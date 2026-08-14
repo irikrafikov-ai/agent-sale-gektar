@@ -123,8 +123,50 @@ async def прогон(вид: str) -> str:
     return последний
 
 
+ОБЯЗАТЕЛЬНЫЕ = {
+    "ANTHROPIC_API_KEY": "ключ Anthropic (console.anthropic.com → API Keys)",
+    "AVITO_CLIENT_ID": "Авито → Настройки → Клиенты и приложения",
+    "AVITO_CLIENT_SECRET": "там же, рядом с client_id",
+    "BITRIX_WEBHOOK": "Битрикс → Разработчикам → Входящий вебхук",
+    "TELEGRAM_BOT_TOKEN": "@BotFather → /newbot",
+    "TELEGRAM_CHAT_ID": "@userinfobot",
+}
+
+
+def проверить_переменные() -> list[str]:
+    """Возвращает список недостающих переменных — все сразу, а не первую попавшуюся.
+
+    Без этой проверки процесс падал сырым KeyError на первой же отсутствующей
+    переменной: чинишь одну, деплоишь, узнаёшь про следующую.
+    """
+    return [имя for имя in ОБЯЗАТЕЛЬНЫЕ if not os.environ.get(имя)]
+
+
 def main() -> int:
     вид = sys.argv[1] if len(sys.argv) > 1 else "вечер"
+
+    недостаёт = проверить_переменные()
+    if недостаёт:
+        print("НЕ ХВАТАЕТ ПЕРЕМЕННЫХ ОКРУЖЕНИЯ — прогон не начат.\n", file=sys.stderr)
+        for имя in недостаёт:
+            print(f"  {имя:22} — {ОБЯЗАТЕЛЬНЫЕ[имя]}", file=sys.stderr)
+        print(
+            "\nЗадайте их в Railway → сервис → Variables. Шаблон: сервис/.env.example",
+            file=sys.stderr,
+        )
+        # Если Телеграм настроен, а отвалилось что-то другое — сообщаем туда:
+        # иначе про нерабочий прогон никто не узнает до вечернего отчёта.
+        if not {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"} & set(недостаёт):
+            try:
+                Telegram().send(
+                    "Прогон не начат: не заданы переменные окружения — "
+                    + ", ".join(недостаёт),
+                    alert=True,
+                )
+            except Exception:
+                pass  # алерт не критичен, сообщение уже в логах Railway
+        return 1
+
     telegram = Telegram()
 
     try:
