@@ -30,6 +30,17 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/сервис \
     KB_PATH=/opt/база-знаний
 
+# Работаем не от root. Это не гигиена, а обязательное условие: Claude Code
+# отказывается запускаться с --dangerously-skip-permissions под root, а именно
+# в этот флаг разворачивается permission_mode="bypassPermissions", без которого
+# автономный прогон невозможен — подтверждать разрешения на сервере некому.
+RUN useradd --create-home --shell /bin/bash agent \
+    && mkdir -p /opt/база-знаний \
+    && chown -R agent:agent /app /opt/база-знаний
+
+USER agent
+ENV HOME=/home/agent
+
 # Аргумент — вид прогона: утро | вечер.
 # Railway передаёт его в команде расписания.
 ENTRYPOINT ["python", "сервис/прогон.py"]

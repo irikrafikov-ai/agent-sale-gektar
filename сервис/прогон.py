@@ -172,7 +172,13 @@ def main() -> int:
     try:
         отчёт = asyncio.run(прогон(вид))
     except Exception as e:
-        telegram.send(f"Прогон *{вид}* упал: `{type(e).__name__}: {e}`", alert=True)
+        # Алерт отправляем best-effort. Если Телеграм тоже недоступен, его
+        # ошибка не должна подменять настоящую причину падения: иначе в логах
+        # видно «TelegramError», а из-за чего упал прогон — уже нет.
+        try:
+            telegram.send(f"Прогон *{вид}* упал: `{type(e).__name__}: {e}`", alert=True)
+        except Exception as ошибка_алерта:
+            print(f"алерт в Телеграм не ушёл: {ошибка_алерта}", file=sys.stderr)
         raise
 
     отправлено = инструменты.отправленные()
