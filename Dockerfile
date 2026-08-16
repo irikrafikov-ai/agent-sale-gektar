@@ -43,5 +43,5 @@ ENV HOME=/home/agent
 
 # Аргумент — вид прогона: утро | вечер.
 # Railway передаёт его в команде расписания.
-ENTRYPOINT ["python", "сервис/прогон.py"]
+ENTRYPOINT ["python", "сервис/запуск.py"]
 CMD ["вечер"]
