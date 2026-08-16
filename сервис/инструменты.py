@@ -36,6 +36,27 @@ def avito() -> Avito:
     return _клиенты["avito"]  # type: ignore[return-value]
 
 
+def avito2() -> Avito:
+    """Второй кабинет Авито («Светлая долина»).
+
+    Отдельная пара ключей AVITO2_* — у Авито токен выдаётся на пару
+    client_id/secret, одним клиентом два кабинета не обслужить.
+    Если переменные не заданы, кабинет считается не подключённым: инструменты
+    второго кабинета не регистрируются, и агент его в упор не видит —
+    это штатный режим до момента, когда Ирик заведёт ключи в Variables.
+    """
+    if "avito2" not in _клиенты:
+        _клиенты["avito2"] = Avito(
+            client_id=os.environ["AVITO2_CLIENT_ID"],
+            client_secret=os.environ["AVITO2_CLIENT_SECRET"],
+        )
+    return _клиенты["avito2"]  # type: ignore[return-value]
+
+
+def avito2_подключён() -> bool:
+    return bool(os.environ.get("AVITO2_CLIENT_ID") and os.environ.get("AVITO2_CLIENT_SECRET"))
+
+
 def bitrix() -> Bitrix:
     if "bitrix" not in _клиенты:
         _клиенты["bitrix"] = Bitrix()
@@ -74,17 +95,39 @@ def _json_arg(raw: str | None, default: Any) -> Any:
 
 # --- Авито ---------------------------------------------------------------
 
+# Кабинета два: "gektar" (Щёкинские берега, по умолчанию) и "dolina"
+# (Светлая долина). Инструменты общие, кабинет выбирается аргументом account —
+# так регламент и наработанные привычки агента работают на оба без правок.
 
-@tool("avito_chats_list", "Список чатов аккаунта Авито", {"limit": int, "offset": int})
+
+def _avito(args: dict) -> Avito:
+    account = args.get("account") or "gektar"
+    if account == "gektar":
+        return avito()
+    if account == "dolina":
+        if not avito2_подключён():
+            raise AvitoНеПодключён(
+                "кабинет «Светлая долина» не подключён: не заданы AVITO2_CLIENT_ID/AVITO2_CLIENT_SECRET"
+            )
+        return avito2()
+    raise AvitoНеПодключён(f"неизвестный account={account!r}, допустимо: gektar | dolina")
+
+
+class AvitoНеПодключён(RuntimeError):
+    pass
+
+
+@tool("avito_chats_list", "Список чатов аккаунта Авито. account: gektar (по умолчанию) | dolina", {"limit": int, "offset": int, "account": str})
 async def avito_chats_list(args: dict) -> dict:
     try:
-        chats = avito().chats_list(limit=args.get("limit", 100), offset=args.get("offset", 0))
+        cli = _avito(args)
+        chats = cli.chats_list(limit=args.get("limit", 100), offset=args.get("offset", 0))
     except Exception as e:
         return _err(str(e))
 
     # Отдаём срез, а не сырой ответ: в полном виде 100 чатов не помещаются
     # в контекст, и агент теряет обзор именно там, где он нужен.
-    me = avito().user_id
+    me = cli.user_id
     out = []
     for c in chats:
         ctx = (c.get("context", {}).get("value") or {})
@@ -107,14 +150,15 @@ async def avito_chats_list(args: dict) -> dict:
     return _ok(out)
 
 
-@tool("avito_chat_messages", "История сообщений чата Авито", {"chat_id": str, "limit": int})
+@tool("avito_chat_messages", "История сообщений чата Авито. account: gektar | dolina", {"chat_id": str, "limit": int, "account": str})
 async def avito_chat_messages(args: dict) -> dict:
     try:
-        msgs = avito().chat_messages(args["chat_id"], limit=args.get("limit", 30))
+        cli = _avito(args)
+        msgs = cli.chat_messages(args["chat_id"], limit=args.get("limit", 30))
     except Exception as e:
         return _err(str(e))
 
-    me = avito().user_id
+    me = cli.user_id
     return _ok(
         [
             {
@@ -131,23 +175,23 @@ async def avito_chat_messages(args: dict) -> dict:
 @tool(
     "avito_send_message",
     "ЗАПИСЬ. Отправляет сообщение клиенту в чат Авито. Перед вызовом проверь стоп-краны AGENT.md §2 и сверься с Битриксом: отказникам не пишем.",
-    {"chat_id": str, "text": str},
+    {"chat_id": str, "text": str, "account": str},
 )
 async def avito_send_message(args: dict) -> dict:
     if MODE != "send":
         return _err(f"режим {MODE}: отправка клиентам отключена, сообщение НЕ ушло")
     try:
-        result = avito().send_message(args["chat_id"], args["text"])
+        result = _avito(args).send_message(args["chat_id"], args["text"])
     except Exception as e:
         return _err(str(e))
-    _sent.append({"chat_id": args["chat_id"], "text": args["text"]})
+    _sent.append({"chat_id": args["chat_id"], "text": args["text"], "account": args.get("account") or "gektar"})
     return _ok({"отправлено": True, "id": result.get("id")})
 
 
-@tool("avito_item_info", "Карточка объявления Авито: площадь, цена, адрес", {"item_id": int})
+@tool("avito_item_info", "Карточка объявления Авито: площадь, цена, адрес. account: gektar | dolina", {"item_id": int, "account": str})
 async def avito_item_info(args: dict) -> dict:
     try:
-        return _ok(avito().item_info(args["item_id"]))
+        return _ok(_avito(args).item_info(args["item_id"]))
     except Exception as e:
         return _err(str(e))
 

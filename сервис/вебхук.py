@@ -413,14 +413,14 @@ def health() -> dict:
     return {"status": "ok", "режим": РЕЖИМ, "время_мск": datetime.now(МСК).isoformat()}
 
 
-@app.post("/avito/{секрет}")
-async def приём(секрет: str, request: Request, фон: BackgroundTasks) -> Response:
+@app.post("/avito/{secret}")
+async def приём(secret: str, request: Request, фон: BackgroundTasks) -> Response:
     """Принять и немедленно ответить: у нас есть две секунды, не больше.
 
     Вся работа уходит в фон. Авито при отсутствии 200 OK повторяет доставку,
     а повтор здесь означает второе сообщение клиенту.
     """
-    if СЕКРЕТ and секрет != СЕКРЕТ:
+    if СЕКРЕТ and secret != СЕКРЕТ:
         лог("отвергнут запрос с чужим секретом")
         return Response(status_code=404)
 
