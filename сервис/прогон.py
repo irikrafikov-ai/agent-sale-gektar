@@ -165,10 +165,35 @@ async def прогон(вид: str, chat_id: str | None = None, повод: str 
     )
 
     последний = ""
-    async for message in query(prompt=текст_задания, options=options):
-        for block in getattr(message, "content", []) or []:
-            if getattr(block, "type", None) == "text" and block.text.strip():
-                последний = block.text
+    try:
+        async for message in query(prompt=текст_задания, options=options):
+            for block in getattr(message, "content", []) or []:
+                if getattr(block, "type", None) == "text" and block.text.strip():
+                    последний = block.text
+    except Exception as e:
+        # Обрыв в конце хода — не повод терять всё, что агент уже сделал.
+        #
+        # 16.08 прогон упал с «Claude Code returned an error result: success».
+        # Формулировка бессмысленная не случайно: CLI прислал результат с
+        # is_error=True, пустым списком errors и subtype «success», а SDK,
+        # не найдя текста ошибки, подставил subtype. То есть CLI сообщил об
+        # ошибке, не сказав какой, и вышел с ненулевым кодом. Так выглядит
+        # падение уже ПОСЛЕ работы — например, когда контейнер убит по памяти.
+        #
+        # Опасность тут не в самом падении, а в тишине: сообщения клиентам
+        # ушли, Битрикс записан, а отчёт не дошёл. Не зная этого, прогон
+        # запускают заново — и рассылка уходит по второму разу.
+        if не_потерянный := последний.strip():
+            отправлено = len(инструменты.отправленные())
+            return (
+                f"{не_потерянный}\n\n---\n"
+                f"⚠️ **Прогон оборвался после работы.** `{type(e).__name__}: {e}`\n\n"
+                f"Отчёт выше собран до обрыва и, скорее всего, отражает "
+                f"выполненную работу: отправлено сообщений — {отправлено}.\n"
+                f"**Перед повторным запуском сверьтесь с Битриксом и чатами** — "
+                f"иначе рассылка уйдёт второй раз."
+            )
+        raise
     return последний
 
 
