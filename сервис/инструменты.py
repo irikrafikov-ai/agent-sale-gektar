@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 import os
+import time
+from collections import deque
 from typing import Any
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
@@ -74,6 +76,19 @@ def telegram() -> Telegram:
 MODE = os.environ.get("AGENT_MODE", "send")
 
 _sent: list[dict] = []  # факты отправки за прогон, для сверки в отчёте
+
+# Стоп-кран темпа из рабочего цикла, шаг 4: не больше 30 уникальных сообщений
+# в час. До 16.08 правило жило только в тексте регламента и в тот день было
+# нарушено — 29 сообщений за семь минут. Теперь его держит код.
+ПРЕДЕЛ_В_ЧАС = int(os.environ.get("ПРЕДЕЛ_В_ЧАС", "30"))
+_отправки: deque[float] = deque(maxlen=500)
+
+
+def _темп_позволяет() -> bool:
+    порог = time.time() - 3600
+    while _отправки and _отправки[0] < порог:
+        _отправки.popleft()
+    return len(_отправки) < ПРЕДЕЛ_В_ЧАС
 
 
 def _ok(payload: Any) -> dict:
@@ -180,10 +195,24 @@ async def avito_chat_messages(args: dict) -> dict:
 async def avito_send_message(args: dict) -> dict:
     if MODE != "send":
         return _err(f"режим {MODE}: отправка клиентам отключена, сообщение НЕ ушло")
+
+    # Стоп-кран темпа. До 16.08 он существовал только в тексте регламента —
+    # и в тот день был превышен: 29 сообщений за семь минут, не меньше 33 за
+    # час при потолке 30. Правило, которое проверяет только сам агент, рано или
+    # поздно нарушается: в разгаре рассылки считать отправленные некому.
+    # Больше 30 в час — риск блокировки аккаунта, а это вся база разом.
+    if not _темп_позволяет():
+        return _err(
+            f"СТОП-КРАН ТЕМПА: за последний час уже отправлено {ПРЕДЕЛ_В_ЧАС} сообщений. "
+            f"Отправка заблокирована. Останови рассылку, оставшихся вынеси в отчёт "
+            f"списком и предупреди Ирика — решение о превышении принимает он."
+        )
+
     try:
         result = _avito(args).send_message(args["chat_id"], args["text"])
     except Exception as e:
         return _err(str(e))
+    _отправки.append(time.time())
     _sent.append({"chat_id": args["chat_id"], "text": args["text"], "account": args.get("account") or "gektar"})
     return _ok({"отправлено": True, "id": result.get("id")})
 
