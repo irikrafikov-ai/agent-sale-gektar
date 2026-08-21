@@ -13,19 +13,24 @@
 поломкой на сутки.
 
 Команды:
-    python сервис/подписка.py список
-    python сервис/подписка.py подписать https://<домен>/avito/<секрет>
-    python сервис/подписка.py отписать https://<домен>/avito/<секрет>
+    python сервис/подписка.py список [кабинет]
+    python сервис/подписка.py подписать https://<домен>/avito/<секрет> [кабинет]
+    python сервис/подписка.py отписать https://<домен>/avito/<секрет> [кабинет]
+
+Кабинет — ключ из кабинеты.py (gektar, dolina). Без него берутся «Берега».
 """
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from интеграции.avito import Avito  # noqa: E402
+
+import кабинеты as реестр  # noqa: E402
 
 СПИСОК = "/messenger/v1/subscriptions"
 ПОДПИСАТЬ = "/messenger/v3/webhook"
@@ -113,17 +118,35 @@ def main() -> int:
         return 1
 
     команда = sys.argv[1]
-    клиент = Avito()
+
+    # Кабинет — последний аргумент, если он есть в реестре. Без него берётся
+    # «Берега»: так прежние команды продолжают работать без правок.
+    ключ = реестр.ПО_УМОЛЧАНИЮ
+    аргументы = sys.argv[2:]
+    if аргументы and аргументы[-1] in реестр.КАБИНЕТЫ:
+        ключ = аргументы.pop()
+    каб = реестр.кабинет(ключ)
+
+    if not реестр.настроен(каб):
+        print(
+            f"Кабинет «{каб['название']}» не настроен: задайте "
+            + " и ".join(каб["переменные"])
+        )
+        return 1
+
+    id_, secret = каб["переменные"]
+    клиент = Avito(client_id=os.environ[id_], client_secret=os.environ[secret])
+    print(f"Кабинет: {каб['название']} (Авито id {каб['avito_user_id']})\n")
 
     if команда == "список":
         команда_список(клиент)
         return 0
 
     if команда in ("подписать", "отписать"):
-        if len(sys.argv) < 3:
-            print(f"Нужен URL: python сервис/подписка.py {команда} https://...")
+        if not аргументы:
+            print(f"Нужен URL: python сервис/подписка.py {команда} https://... [кабинет]")
             return 1
-        url = sys.argv[2]
+        url = аргументы[0]
         if not url.startswith("https://"):
             print("Авито принимает только https.")
             return 1
