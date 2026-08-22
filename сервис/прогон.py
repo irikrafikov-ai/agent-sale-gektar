@@ -396,12 +396,22 @@ async def прогон(вид: str, каб: dict, chat_id: str | None = None, п
         "mcp__gektar__telegram_alert",
     ]
 
+    # Модель печатаем в лог. 22.08 полные прогоны перевели на Sonnet ради
+    # расхода, и выяснилось, что проверить переключение нечем: ни в логе, ни в
+    # отчёте модели не было. Сравнивать качество «до и после» вслепую нельзя.
+    модель = (
+        os.environ.get("AGENT_MODEL_ЧАТ", "claude-sonnet-5")
+        if chat_id
+        else os.environ.get("AGENT_MODEL", "claude-opus-5")
+    )
+    print(
+        f"[{datetime.now(МСК):%H:%M:%S}] модель: {модель} · "
+        f"кабинет: {каб['ключ']} · вид: {вид}",
+        flush=True,
+    )
+
     options = ClaudeAgentOptions(
-        model=(
-            os.environ.get("AGENT_MODEL_ЧАТ", "claude-sonnet-5")
-            if chat_id
-            else os.environ.get("AGENT_MODEL", "claude-opus-5")
-        ),
+        model=модель,
         cwd=str(КОРЕНЬ),
         mcp_servers={"gektar": инструменты.сервер},
         allowed_tools=(
@@ -591,7 +601,8 @@ def main() -> int:
 
     отправлено = инструменты.отправленные()
     подпись = (
-        f"\n\n---\n_{каб['название']} · разбор по вебхуку, чат {chat_id}, отправлено: {len(отправлено)}_"
+        f"\n\n---\n_{каб['название']} · разбор по вебхуку, чат {chat_id}, "
+        f"отправлено: {len(отправлено)} · модель: {модель}_"
         if chat_id
         else f"\n\n---\n_{каб['название']} · прогон {вид}, отправлено: {len(отправлено)}_"
     )
