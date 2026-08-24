@@ -57,5 +57,42 @@ else:
     проверь("номера уникальны", len({x.номер for x in живые}), len(живые))
     проверь("id уникальны", len({x.внешний_id for x in живые}), len(живые))
 
+print("\n3. Фид: структура и ограничения Циан")
+из_живой = cian.загрузить() if "живые" in dir() else []
+у = cian.разобрать(ПОДСТАВНАЯ)
+xml = cian.фид(у, ("+7", "4993254858"))
+import xml.etree.ElementTree as ET
+корень = ET.fromstring(xml)
+проверь("корень feed", корень.tag, "feed")
+проверь("версия 2", корень.findtext("feed_version"), "2")
+проверь("объектов столько же, сколько участков", len(корень.findall("object")), len(у))
+о = корень.find("object")
+проверь("категория landSale", о.findtext("Category"), "landSale")
+проверь("единица площади — сотка", о.findtext("Land/AreaUnitType"), "sotka")
+проверь("ВРИ — ЛПХ", о.findtext("Land/PermittedLandUseType"), "privateFarm")
+проверь("категория земель", о.findtext("Land/LandCategory"), "settlements")
+проверь("валюта рубль", о.findtext("BargainTerms/Currency"), "rur")
+проверь("цена = цене рассрочки", о.findtext("BargainTerms/Price"), str(у[0].цена_рассрочка))
+проверь("телефон на месте", о.findtext("Phones/PhoneSchema/Number"), "4993254858")
+проверь("3D-тур передан", о.findtext("ObjectTour/FullUrl"), cian.ТУР)
+
+оп = о.findtext("Description")
+проверь("описание не короче 15 символов", len(оп) >= 15, True)
+проверь("описание не длиннее 7000", len(оп) <= 7000, True)
+проверь("нет запрещённого амперсанда", "&" in оп, False)
+проверь("нет символа номера", "№" in оп, False)
+проверь("нет косых черт", ("/" in оп or "\\" in оп), False)
+
+print("\n4. Фид на живой шахматке")
+живой = cian.фид(cian.загрузить(), ("+7", "4993254858"))
+корень2 = ET.fromstring(живой)
+объектов = корень2.findall("object")
+проверь("фид разбирается как XML", len(объектов) > 0, True)
+проверь("у всех объектов есть цена", all(o.findtext("BargainTerms/Price") for o in объектов), True)
+проверь("у всех есть телефон", all(o.findtext("Phones/PhoneSchema/Number") for o in объектов), True)
+проверь("внешние id уникальны",
+        len({o.findtext("ExternalId") for o in объектов}), len(объектов))
+print(f"  · размер фида: {len(живой)} байт, объектов: {len(объектов)}")
+
 print("\n" + ("ВСЁ ЗЕЛЁНОЕ" if not провалов else f"ПРОВАЛОВ: {провалов}"))
 sys.exit(1 if провалов else 0)
