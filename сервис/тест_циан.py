@@ -60,7 +60,7 @@ else:
 print("\n3. Фид: структура и ограничения Циан")
 из_живой = cian.загрузить() if "живые" in dir() else []
 у = cian.разобрать(ПОДСТАВНАЯ)
-xml = cian.фид(у, ("+7", "4993254858"))
+xml = cian.фид(у)
 import xml.etree.ElementTree as ET
 корень = ET.fromstring(xml)
 проверь("корень feed", корень.tag, "feed")
@@ -73,7 +73,8 @@ import xml.etree.ElementTree as ET
 проверь("категория земель", о.findtext("Land/LandCategory"), "settlements")
 проверь("валюта рубль", о.findtext("BargainTerms/Currency"), "rur")
 проверь("цена = цене рассрочки", о.findtext("BargainTerms/Price"), str(у[0].цена_рассрочка))
-проверь("телефон на месте", о.findtext("Phones/PhoneSchema/Number"), "4993254858")
+проверь("телефон из кабинета ЦИАН", о.findtext("Phones/PhoneSchema/Number"), "9628883311")
+проверь("код страны", о.findtext("Phones/PhoneSchema/CountryCode"), "+7")
 проверь("3D-тур передан", о.findtext("ObjectTour/FullUrl"), cian.ТУР)
 
 оп = о.findtext("Description")
@@ -84,7 +85,7 @@ import xml.etree.ElementTree as ET
 проверь("нет косых черт", ("/" in оп or "\\" in оп), False)
 
 print("\n4. Фид на живой шахматке")
-живой = cian.фид(cian.загрузить(), ("+7", "4993254858"))
+живой = cian.фид(cian.загрузить())
 корень2 = ET.fromstring(живой)
 объектов = корень2.findall("object")
 проверь("фид разбирается как XML", len(объектов) > 0, True)
