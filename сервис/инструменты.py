@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 import time
 from collections import deque
 from datetime import datetime, timedelta, timezone
@@ -584,6 +586,57 @@ async def b24_call(args: dict) -> dict:
 
 
 @tool(
+    "handoff_chat",
+    "Передать чат Opus-редактору: отдельный разбор составит и отправит клиенту "
+    "грамотное сообщение. Для полного прогона это ЕДИНСТВЕННЫЙ способ написать "
+    "касание: сам текст клиенту не сочиняй. В поводе передай всё, что накопал: "
+    "номер касания, что человек спрашивал, на чём затих, какой участок обсуждали.",
+    {"chat_id": str, "account": str, "повод": str},
+)
+async def handoff_chat(args: dict) -> dict:
+    """Двухъярусная схема, решение Ирика 25.08.2026: Sonnet сканирует и находит,
+    кому писать, Opus составляет само сообщение.
+
+    Дешёвая модель отлично решает «кому и зачем» — это перебор фактов. Дорогая
+    нужна там, где рождается текст клиенту: одна корявая фраза в первом касании
+    стоит больше, чем вся экономия на прогоне. Замер по 153 чатам: формулировка
+    первого сообщения — это разница между 67% и 14% ответов.
+
+    Технически: запускается отдельный чат-разбор (прогон.py чат …) — тот же
+    процесс, что отвечает на живые события вебхука. Он берёт модель из
+    AGENT_MODEL_ЧАТ (Opus с 25.08), сам читает переписку, Битрикс и базу знаний
+    и сам решает, что и как написать. Замок чата защищает от параллельной
+    работы с вебхуком.
+    """
+    if MODE != "send":
+        return _err(f"режим {MODE}: передача чатов отключена")
+
+    chat_id = (args.get("chat_id") or "").strip()
+    if not chat_id:
+        return _err("нужен chat_id")
+
+    процесс = subprocess.run(
+        [
+            sys.executable,
+            str(Path(__file__).parent / "прогон.py"),
+            "чат",
+            chat_id,
+            args.get("account") or "gektar",
+            (args.get("повод") or "касание по каденции")[:500],
+        ],
+        capture_output=True,
+        text=True,
+        timeout=480,
+    )
+    if процесс.returncode != 0:
+        return _err(
+            f"чат-разбор завершился с кодом {процесс.returncode}: "
+            f"{(процесс.stderr or '')[-300:]}"
+        )
+    return _ok({"передано": True, "chat_id": chat_id})
+
+
+@tool(
     "telegram_alert",
     "Срочное сообщение Ирику: сработал стоп-кран, конфликт, горячий клиент. "
     "Не для отчёта — отчёт уходит сам в конце прогона. "
@@ -637,6 +690,7 @@ def отправленные() -> list[dict]:
         avito_chat_messages,
         avito_send_message,
         avito_item_info,
+        handoff_chat,
         avito_calls,
         b24_crm_list,
         b24_crm_get,
@@ -655,6 +709,7 @@ def отправленные() -> list[dict]:
     "mcp__gektar__avito_chat_messages",
     "mcp__gektar__avito_send_message",
     "mcp__gektar__avito_item_info",
+    "mcp__gektar__handoff_chat",
     "mcp__gektar__avito_calls",
     "mcp__gektar__b24_crm_list",
     "mcp__gektar__b24_crm_get",
