@@ -424,6 +424,39 @@ async def avito_send_message(args: dict) -> dict:
     return _ok({"отправлено": True, "id": result.get("id")})
 
 
+@tool(
+    "avito_calls",
+    "Звонки через Авито за период: телефон покупателя, время, длительность разговора. "
+    "Сверяй ПЕРЕД письмом клиенту, был ли с ним разговор (матч по телефону из Битрикса). "
+    "Записей и содержания разговоров нет — только факт и длительность. "
+    "days — за сколько последних дней (по умолчанию 3). account: gektar | dolina",
+    {"days": int, "account": str},
+)
+async def avito_calls(args: dict) -> dict:
+    try:
+        from datetime import datetime, timedelta, timezone
+
+        дней = min(int(args.get("days") or 3), 30)
+        до = datetime.now(timezone.utc)
+        от = до - timedelta(days=дней)
+        cli = _avito(args)
+        звонки = cli.calls(
+            от.strftime("%Y-%m-%dT%H:%M:%SZ"), до.strftime("%Y-%m-%dT%H:%M:%SZ")
+        )
+        out = [
+            {
+                "телефон_покупателя": з.get("buyerPhone"),
+                "когда": з.get("callTime"),
+                "разговор_сек": з.get("talkDuration"),
+                "дозвонился": bool(з.get("talkDuration")),
+            }
+            for з in звонки
+        ]
+        return _ok({"звонков": len(out), "список": out})
+    except Exception as e:
+        return _err(str(e))
+
+
 @tool("avito_item_info", "Карточка объявления Авито: площадь, цена, адрес. account: gektar | dolina", {"item_id": int, "account": str})
 async def avito_item_info(args: dict) -> dict:
     try:
@@ -604,6 +637,7 @@ def отправленные() -> list[dict]:
         avito_chat_messages,
         avito_send_message,
         avito_item_info,
+        avito_calls,
         b24_crm_list,
         b24_crm_get,
         b24_crm_add,
@@ -621,6 +655,7 @@ def отправленные() -> list[dict]:
     "mcp__gektar__avito_chat_messages",
     "mcp__gektar__avito_send_message",
     "mcp__gektar__avito_item_info",
+    "mcp__gektar__avito_calls",
     "mcp__gektar__b24_crm_list",
     "mcp__gektar__b24_crm_get",
     "mcp__gektar__b24_crm_add",

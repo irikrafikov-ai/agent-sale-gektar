@@ -144,5 +144,26 @@ class Avito:
     def item_info(self, item_id: int) -> dict:
         return self._request("GET", f"/core/v1/accounts/{self.user_id}/items/{item_id}/")
 
+    # --- звонки (коллтрекинг) --------------------------------------------
+
+    def calls(self, date_from: str, date_to: str, limit: int = 100, offset: int = 0) -> list[dict]:
+        """Метаданные звонков Авито: телефон покупателя, время, длительность.
+
+        Записей разговоров API v1 не отдаёт (проверено 25.08.2026: методов
+        get­CallRecord* нет, в ответе getCalls нет ссылок) — только факты
+        звонков. Даты — ISO, например «2026-08-25T00:00:00Z».
+        """
+        data = self._request(
+            "POST",
+            "/calltracking/v1/getCalls/",
+            json={
+                "dateTimeFrom": date_from,
+                "dateTimeTo": date_to,
+                "limit": limit,
+                "offset": offset,
+            },
+        )
+        return (data.get("data") or {}).get("calls", [])
+
     def close(self) -> None:
         self._http.close()
