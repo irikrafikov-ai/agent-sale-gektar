@@ -46,7 +46,8 @@ from интеграции.avito import Avito  # noqa: E402
 from интеграции.bitrix import Bitrix  # noqa: E402
 from интеграции.telegram import Telegram  # noqa: E402
 
-import кабинеты as реестр  # noqa: E402
+import кабинеты as реестр
+import сторож  # noqa: E402
 
 КОРЕНЬ = Path(__file__).resolve().parent.parent
 МСК = timezone(timedelta(hours=3))
@@ -608,6 +609,60 @@ def разбудить_агента(chat_id: str, повод: str, каб: dict)
 
 
 # --- HTTP ------------------------------------------------------------------
+
+
+async def сторожить() -> None:
+    """Раз в час: не ждёт ли кто-то ответа дольше положенного.
+
+    Живёт в вебхуке, потому что вебхук — единственный сервис, работающий
+    круглосуточно. Прогоны просыпаются по расписанию и как раз могут упасть,
+    а сторож должен пережить их падение — он для этого и нужен.
+    """
+    ЧАС = int(os.environ.get("СТОРОЖ_ИНТЕРВАЛ", "3600"))
+    await asyncio.sleep(120)  # даём сервису подняться, не шумим на старте
+
+    while True:
+        try:
+            if сторож.сейчас_тихо():
+                await asyncio.sleep(ЧАС)
+                continue
+
+            все: list[сторож.Забытый] = []
+            for ключ, каб in реестр.КАБИНЕТЫ.items():
+                if not реестр.настроен(каб):
+                    continue
+                id_, secret = каб["переменные"]
+                клиент = Avito(
+                    client_id=os.environ[id_], client_secret=os.environ[secret]
+                )
+                try:
+                    чаты = клиент.chats_list(limit=100)
+                    чаты += клиент.chats_list(limit=100, offset=100)
+                    все += сторож.забытые(
+                        чаты, клиент.user_id, каб["название"]
+                    )
+                finally:
+                    клиент.close()
+
+            текст = сторож.отчёт(все)
+            if текст:
+                telegram().send(текст, alert=True)
+                print(f"[сторож] ждут ответа: {len(все)}", flush=True)
+            else:
+                print("[сторож] все отвечены", flush=True)
+        except Exception as ошибка:  # noqa: BLE001 — сторож не должен ронять вебхук
+            print(f"[сторож] сбой: {type(ошибка).__name__}: {ошибка}", flush=True)
+
+        await asyncio.sleep(ЧАС)
+
+
+@app.on_event("startup")
+async def запустить_сторожа() -> None:
+    if os.environ.get("СТОРОЖ", "on") == "off":
+        print("[сторож] выключен переменной СТОРОЖ=off", flush=True)
+        return
+    asyncio.create_task(сторожить())
+    print("[сторож] включён", flush=True)
 
 
 @app.get("/health")

@@ -24,6 +24,9 @@ class _App:
     def post(self, *a, **k):
         return lambda f: f
 
+    def on_event(self, *a, **k):
+        return lambda f: f
+
 
 fastapi.FastAPI = _App
 fastapi.Request = object
