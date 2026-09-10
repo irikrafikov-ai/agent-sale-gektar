@@ -1148,7 +1148,13 @@ async def вывод_дня(цифры_текст: str, отчёт_агента:
             cwd=str(КОРЕНЬ),
             allowed_tools=[],
             permission_mode="bypassPermissions",
-            max_turns=1,
+            # НЕ 1. С max_turns=1 SDK обрывает вызов раньше, чем модель отдаёт
+            # готовый текст: 09.09 вывод дня отработал и был оплачен ($0.08 на
+            # Opus), а в отчёт не попал ни строкой — деньги списались, толку
+            # ноль. Инструментов у вызова нет, ходить некуда, поэтому запас в
+            # несколько ходов ничего не стоит, но гарантирует, что финальное
+            # сообщение с текстом успеет прийти.
+            max_turns=int(os.environ.get("AGENT_MAX_TURNS_ВЫВОД", "4")),
             system_prompt={"type": "preset", "preset": "claude_code"},
         )
         текст = ""
@@ -1159,6 +1165,12 @@ async def вывод_дня(цифры_текст: str, отчёт_агента:
             for block in getattr(message, "content", []) or []:
                 if getattr(block, "type", None) == "text" and block.text.strip():
                     текст = block.text
+        if not текст.strip():
+            print(
+                f"[вывод] модель вернула пустой текст (модель {модель}) — "
+                "раздел «что улучшить» в отчёт не попадёт",
+                file=sys.stderr,
+            )
         if (usd := расход_вывода.get("usd")) is not None:
             print(
                 f"[{datetime.now(МСК):%H:%M:%S}] вывод дня · {модель} · ${usd:.2f}",
