@@ -579,18 +579,63 @@ def записать_в_битрикс(
         )
     )
     try:
-        сделки = bitrix().crm_list(
-            "deal",
-            filter={"CATEGORY_ID": 0, "%TITLE": имя},
-            select=["ID", "TITLE"],
-        )
-        if not сделки:
-            лог(chat_id, "⚠️ сделки в Битриксе нет — комментарий записать некуда")
+        # Карточку ищем ПО ЧАТУ, а не по имени. До 17.09.2026 здесь стояло
+        # «первая сделка, в названии которой есть имя» — и 13.09, 16.09 записи
+        # о новых Олегах (чаты fbjSscVs, bJ1q96xU) легли в карточку 2639
+        # другого Олега, у которого шёл живой разговор про уч. №3/№4.
+        # Открытая линия заводит карточку с задержкой в секунды, поэтому
+        # три попытки с паузой: карточка ещё не создана ≠ карточки нет.
+        ид = None
+        for попытка in range(3):
+            ид = сделка_по_чату(chat_id, имя)
+            if ид:
+                break
+            time.sleep(15)
+        if not ид:
+            лог(chat_id, "⚠️ карточки по этому чату в Битриксе нет — комментарий записать некуда")
             return
-        bitrix().timeline_comment_add(сделки[0]["ID"], комментарий)
-        лог("битрикс: комментарий в сделку", сделки[0]["ID"])
+        bitrix().timeline_comment_add(ид, комментарий)
+        лог(chat_id, "битрикс: комментарий в сделку", ид)
     except Exception as ошибка:  # noqa: BLE001
         лог(chat_id, "⚠️ шаблон ушёл, но комментарий не записался:", ошибка)
+
+
+def сделка_по_чату(chat_id: str, имя: str = "") -> int | None:
+    """ID карточки, которая принадлежит именно этому чату.
+
+    Порядок: ORIGIN_ID — самый надёжный; затем карточки с таким именем, у
+    контакта которых в IM-поле стоит этот chat_id (так открытая линия
+    привязывает свои карточки), — найденной довязываем ORIGIN_ID, чтобы в
+    следующий раз обойтись первым шагом. Совпадение одного лишь имени
+    карточкой не считается: тёзок в базе десятки.
+    """
+    b = bitrix()
+    по_чату = b.crm_list(
+        "deal", filter={"ORIGIN_ID": chat_id}, select=["ID", "DATE_CREATE"]
+    )
+    if по_чату:
+        return int(sorted(по_чату, key=lambda с: с.get("DATE_CREATE") or "")[-1]["ID"])
+    if not имя:
+        return None
+    кандидаты = b.crm_list(
+        "deal",
+        filter={"CATEGORY_ID": 0, "%TITLE": имя},
+        select=["ID", "CONTACT_ID", "DATE_CREATE"],
+    )
+    for с in sorted(кандидаты, key=lambda с: с.get("DATE_CREATE") or "", reverse=True):
+        if not с.get("CONTACT_ID"):
+            continue
+        try:
+            контакт = b.crm_get("contact", с["CONTACT_ID"])
+        except Exception:  # noqa: BLE001 — один контакт не должен ронять поиск
+            continue
+        if any(chat_id in (im.get("VALUE") or "") for im in контакт.get("IM") or []):
+            try:
+                b.crm_update("deal", с["ID"], {"ORIGINATOR_ID": "avito", "ORIGIN_ID": chat_id})
+            except Exception:  # noqa: BLE001 — привязка желательна, но не обязательна
+                pass
+            return int(с["ID"])
+    return None
 
 
 # --- решение и действие ----------------------------------------------------
