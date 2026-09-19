@@ -181,11 +181,15 @@ class _ФейкБитриксЛинии:
     def crm_list(self, entity, filter=None, select=None, limit=50):
         if entity != "deal":
             return []
-        if filter and "%ORIGIN_ID" in filter:
-            return self.первичные
         if filter and "%TITLE" in filter:
             return self.сделки_линии
         if filter and "ORIGIN_ID" in filter:
+            значение = filter["ORIGIN_ID"]
+            if isinstance(значение, list):
+                # Новый контракт 19.09.2026: первичные ищутся точным списком
+                # чатов открытых линий (старый %ORIGIN_ID упирался в потолок
+                # 500 записей и слеп на свежих сделках).
+                return [п for п in self.первичные if п.get("ORIGIN_ID") in значение]
             return []  # «своя» карточка по точному chat_id — в этих тестах её нет
         return []
 
