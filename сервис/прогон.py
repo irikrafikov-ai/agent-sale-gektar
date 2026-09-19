@@ -179,6 +179,9 @@ def дельта_чатов(каб: dict) -> dict | None:
 
         выбрано: list[tuple[str, str, str]] = []
         for c in чаты:
+            # Чужое объявление — партнёрский контур, агенту продаж не показываем.
+            if реестр.партнёрский_чат(каб, c):
+                continue
             lm = c.get("last_message") or {}
             ts = lm.get("created") or 0
             когда = datetime.fromtimestamp(ts, МСК) if ts else None

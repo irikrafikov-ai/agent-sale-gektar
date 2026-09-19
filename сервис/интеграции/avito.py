@@ -106,6 +106,11 @@ class Avito:
         )
         return data.get("chats", [])
 
+    def chat_info(self, chat_id: str) -> dict:
+        """Карточка чата: context с объявлением и users. Нужна вебхуку, чтобы
+        по user_id объявления понять, чужое оно или наше."""
+        return self._request("GET", f"/messenger/v2/accounts/{self.user_id}/chats/{chat_id}")
+
     def chat_messages(self, chat_id: str, limit: int = 50, offset: int = 0) -> list[dict]:
         data = self._request(
             "GET",
