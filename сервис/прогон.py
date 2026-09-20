@@ -1526,6 +1526,10 @@ def main() -> int:
         print(e, file=sys.stderr)
         return 1
 
+    if причина := каб.get("выключен"):
+        print(f"Кабинет «{каб['название']}» выключен для агента продаж: {причина}. Выхожу.")
+        return 0
+
     недостающие = [п for п in каб["переменные"] if not os.environ.get(п)]
     if недостающие:
         print(
