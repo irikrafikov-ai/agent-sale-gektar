@@ -235,7 +235,10 @@ function render(D) {
 
   const RP = D.отчёты || [];
   document.getElementById('reports').innerHTML = RP.length ? RP.map((o, i) => {
-    const первая = (o.вывод || o.текст).split('\n').map(l => l.replace(/^[#*\s📌]+/, '').trim()).filter(l => l && !/^вывод дня/i.test(l))[0] || '';
+    // В строке-заголовке — сводка цифр дня, если есть; иначе первая содержательная строка вывода.
+    const строки = o.текст.split('\n').map(l => l.replace(/\*/g, '').trim());
+    const цифры = ['Новых лидов', 'Диалогов', 'Новых тёплых', 'Расход на токены'].map(k => строки.find(l => l.startsWith(k + ':'))).filter(Boolean).map(l => l.replace(/\s*\(.*?\)/g, '').replace(/ — .*$/, ''));
+    const первая = цифры.length ? цифры.join(' · ') : ((o.вывод || o.текст).split('\n').map(l => l.replace(/^[#*\s📌_(]+/, '').trim()).filter(l => l && !/^вывод дня|^восстановлен/i.test(l))[0] || '');
     return `<details class="rep"${i === 0 ? ' open' : ''}><summary><b>${dm(o.дата)}</b><span>${esc(первая)}</span></summary><div class="md">${md(o.текст)}</div></details>`;
   }).join('') : '<div class="empty">архив пуст — первый отчёт ляжет сюда после вечернего прогона</div>';
 
