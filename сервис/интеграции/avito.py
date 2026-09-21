@@ -149,6 +149,19 @@ class Avito:
     def item_info(self, item_id: int) -> dict:
         return self._request("GET", f"/core/v1/accounts/{self.user_id}/items/{item_id}/")
 
+    # --- кошелёк ---------------------------------------------------------
+
+    def operations_history(self, date_from: str, date_to: str) -> list[dict]:
+        """Операции кошелька Авито за период: пополнения, резервы под услуги
+        (продвижение, XL, выделение, рассылки), возвраты. Даты — ISO без зоны,
+        например «2026-09-01T00:00:00». Нужно дашборду для расходов на Авито."""
+        data = self._request(
+            "POST",
+            "/core/v1/accounts/operations_history/",
+            json={"dateTimeFrom": date_from, "dateTimeTo": date_to},
+        )
+        return ((data.get("result") or {}).get("operations")) or []
+
     # --- звонки (коллтрекинг) --------------------------------------------
 
     def calls(self, date_from: str, date_to: str, limit: int = 100, offset: int = 0) -> list[dict]:

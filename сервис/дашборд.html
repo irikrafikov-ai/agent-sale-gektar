@@ -50,6 +50,15 @@
   .err{background:#452626;color:#f0a0a0;padding:10px 12px;border-radius:10px;margin-bottom:12px;display:none}
   .scroll{overflow-x:auto}
   ul.lessons{margin:0;padding-left:18px}ul.lessons li{margin:4px 0}
+  details.rep{border:1px solid var(--line);border-radius:10px;margin:6px 0;background:var(--card-2)}
+  details.rep summary{cursor:pointer;padding:9px 12px;display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;list-style:none}
+  details.rep summary::-webkit-details-marker{display:none}
+  details.rep summary b{font-weight:600}
+  details.rep summary span{color:var(--muted);font-size:12px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .md{padding:4px 14px 12px;font-size:13px;line-height:1.5;border-top:1px solid var(--line)}
+  .md h1,.md h2{font-size:14px;margin:12px 0 4px}.md h3{font-size:13px;margin:10px 0 2px;color:var(--gold)}
+  .md p{margin:4px 0}.md ul{margin:2px 0 6px;padding-left:18px}.md hr{border:0;border-top:1px solid var(--line);margin:8px 0}
+  .md code{background:var(--card);padding:0 4px;border-radius:4px;font-size:12px}
   @media (max-width:600px){.fr{grid-template-columns:110px 1fr 56px}canvas{height:200px!important}}
 </style>
 </head>
@@ -76,9 +85,14 @@
       <canvas id="chLeads"></canvas>
     </div>
     <div class="card">
-      <h2>Расход на модель, $</h2>
+      <h2>Расходы на токены, $</h2>
       <div class="sub">по дням, все контейнеры агента · <span id="месяц"></span></div>
       <canvas id="chSpend"></canvas>
+    </div>
+    <div class="card">
+      <h2>Расходы на Авито, ₽</h2>
+      <div class="sub">кошелёк Авито «Щёкинские берега»: продвижение, XL, выделение, рассылки; возвраты вычтены · <span id="авито_услуги"></span></div>
+      <canvas id="chAvito"></canvas>
     </div>
     <div class="card">
       <h2>Диалоги в Авито</h2>
@@ -105,6 +119,11 @@
       <div class="sub">закрытые и в рассрочке, суммы по ДКП</div>
       <div class="scroll"><table id="sales"></table></div>
     </div>
+    <div class="card wide">
+      <h2>Отчёты ежедневные</h2>
+      <div class="sub">те же отчёты, что уходят в Телеграм в 18:30 — история; агент читает прошлые выводы перед новым</div>
+      <div id="reports"></div>
+    </div>
     <div class="card">
       <h2>Обучение агента</h2>
       <div class="sub">гипотезы в проверке и уроки последних дней (журнал обучения)</div>
@@ -122,6 +141,7 @@ const charts = {};
 const fmt = (n, d=0) => (n ?? 0).toLocaleString('ru-RU', {maximumFractionDigits:d});
 const dm = (s) => s ? `${s.slice(8,10)}.${s.slice(5,7)}` : '';
 const usd = (n) => '$' + fmt(n, 2);
+const rub = (n) => fmt(n, 0) + ' ₽';
 
 function line(id, labels, datasets, opts={}) {
   if (charts[id]) charts[id].destroy();
@@ -134,6 +154,26 @@ function line(id, labels, datasets, opts={}) {
       scales:{ x:{grid:{display:false}, ticks:{maxTicksLimit:10}}, y:{beginAtZero:true, grid:{color:C.line}, ticks:{precision:0, ...(opts.yTicks||{})}} }
     }
   });
+}
+
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// Отчёт написан в Markdown для Телеграма — рендерим самое нужное: заголовки, жирный, курсив, списки, линии, код.
+function md(src) {
+  const lines = esc(src).split('\n'); let out = '', inList = false;
+  const inline = (t) => t.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g, '$1<i>$2</i>').replace(/_([^_\n]{2,}?)_/g, '<i>$1</i>').replace(/`([^`]+?)`/g, '<code>$1</code>').replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" style="color:var(--gold)">$1</a>');
+  for (const raw of lines) {
+    const l = raw.trimEnd();
+    const li = /^\s*[-•·]\s+(.*)/.exec(l);
+    if (li) { if (!inList) { out += '<ul>'; inList = true; } out += `<li>${inline(li[1])}</li>`; continue; }
+    if (inList) { out += '</ul>'; inList = false; }
+    if (/^---+\s*$/.test(l)) { out += '<hr>'; continue; }
+    const h = /^(#{1,3})\s+(.*)/.exec(l);
+    if (h) { out += `<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`; continue; }
+    if (!l.trim()) continue;
+    out += `<p>${inline(l)}</p>`;
+  }
+  if (inList) out += '</ul>';
+  return out;
 }
 
 function kpi(l, v, d, sub) {
@@ -151,7 +191,8 @@ function render(D) {
     kpi('Продаж', fmt(I.продаж), I.продаж - P.продаж, `${I.конверсия_в_продажу}% от лидов`),
     kpi('Отказов', fmt(I.отказов), null, `${P.отказов} в прошлом периоде`),
     kpi('В работе сейчас', fmt(D.в_работе_всего), null, 'открытых карточек'),
-    kpi('Расход за период', usd(I.расход_usd), null, `на лид ${usd(I.расход_на_лид)} · на тёплого ${usd(I.расход_на_тёплого)}`),
+    kpi('Расходы на токены за период', usd(I.расход_usd), null, `на лид ${usd(I.расход_на_лид)} · на тёплого ${usd(I.расход_на_тёплого)}`),
+    kpi('Расходы на Авито за период', rub(I.авито_руб), null, `на лид ${rub(I.авито_на_лид)} · на тёплого ${rub(I.авито_на_тёплого)}`),
   ].join('');
 
   const R = D.динамика, L = R.map(r => dm(r.дата));
@@ -163,6 +204,10 @@ function render(D) {
   ]);
   line('chSpend', L, [{label:'$ за день', data:R.map(r=>r.расход_usd), backgroundColor:C.s2, borderColor:C.s2}],
        {type:'bar', tip:(c)=>` ${usd(c.parsed.y)} · запусков ${R[c.dataIndex].запусков}`, yTicks:{callback:(v)=>'$'+v}});
+  line('chAvito', L, [{label:'₽ за день', data:R.map(r=>r.авито_руб), backgroundColor:C.s4, borderColor:C.s4}],
+       {type:'bar', tip:(c)=>{const u=R[c.dataIndex].авито_по_услугам||{}; const parts=Object.entries(u).map(([k,v])=>`${k} ${rub(v)}`); return [` ${rub(c.parsed.y)}`, ...parts];}, yTicks:{callback:(v)=>fmt(v)+' ₽'}});
+  const AU = Object.entries(I.авито_по_услугам||{});
+  document.getElementById('авито_услуги').textContent = AU.length ? AU.slice(0,4).map(([k,v])=>`${k} ${rub(v)}`).join(' · ') : 'за период расходов нет';
   const м = D.расход_месяц || {};
   document.getElementById('месяц').textContent = м.дней ? `за месяц ${usd(м.usd)} (${м.дней} дн., с ${dm(м.с_какого_дня)})` : 'за месяц: нет данных';
   const hasDlg = R.some(r => r.диалогов != null);
@@ -187,6 +232,12 @@ function render(D) {
   document.getElementById('sales').innerHTML = S.length ? '<tr><th>Сделка</th><th>Статус</th><th class="r">Дата</th><th class="r">Сумма</th></tr>' +
     S.map(s => `<tr><td><a style="color:var(--ink);text-decoration:none" href="https://gektar.bitrix24.ru/crm/deal/details/${s.id}/" target="_blank">${s.название}</a></td><td><span class="tag ${s.стадия==='Продано'?'ok':'check'}">${s.стадия}</span></td><td class="r">${dm(s.дата)}</td><td class="r">${fmt(s.сумма)} ₽</td></tr>`).join('') +
     `<tr><td colspan="3" style="color:var(--muted)">итого</td><td class="r"><b>${fmt(total)} ₽</b></td></tr>` : '<tr><td class="empty">продаж пока нет</td></tr>';
+
+  const RP = D.отчёты || [];
+  document.getElementById('reports').innerHTML = RP.length ? RP.map((o, i) => {
+    const первая = (o.вывод || o.текст).split('\n').map(l => l.replace(/^[#*\s📌]+/, '').trim()).filter(l => l && !/^вывод дня/i.test(l))[0] || '';
+    return `<details class="rep"${i === 0 ? ' open' : ''}><summary><b>${dm(o.дата)}</b><span>${esc(первая)}</span></summary><div class="md">${md(o.текст)}</div></details>`;
+  }).join('') : '<div class="empty">архив пуст — первый отчёт ляжет сюда после вечернего прогона</div>';
 
   const O = D.обучение, hyp = O.гипотезы || [], les = O.уроки || [];
   const st = {'проверяю':'check','подтверждена':'ok','опровергнута':'no','снята':''};
