@@ -25,6 +25,7 @@ from claude_agent_sdk import create_sdk_mcp_server, tool
 from интеграции.avito import Avito
 from интеграции.bitrix import Bitrix
 from интеграции.telegram import Telegram
+from интеграции.umnico import Umnico, UmnicoError, нормализовать_номер, НОМЕР_КАНАЛА
 
 # Клиенты создаются лениво, при первом обращении.
 #
@@ -821,6 +822,55 @@ async def telegram_alert(args: dict) -> dict:
     return _ok({"отправлено": True})
 
 
+@tool(
+    "max_send",
+    "Написать клиенту в MAX по номеру телефона (канал «Ева ГектарЪ», "
+    f"{НОМЕР_КАНАЛА}). Номер в любом виде — «9207938710», «8 920…», «+7…» — "
+    "недостающая 7 добавляется сама. Есть диалог с этим номером в Umnico — "
+    "пишет в него, нет — пишет первым в MAX. Правило Ирика 21.09.2026: "
+    "пообещал прислать в MAX — отправляй В ЭТОМ ЖЕ разборе этим инструментом; "
+    "фото/видео — ссылкой на папку живых материалов из брифа. Обязательно "
+    "chat_id и account чата Авито, из которого пришёл номер, и deal_id — "
+    "факт отправки пишется в карточку.",
+    {"phone": str, "text": str, "chat_id": str, "account": str, "deal_id": str},
+)
+async def max_send(args: dict) -> dict:
+    беда = _лид_без_клиента(args)
+    if беда:
+        return _err(беда)
+    if not os.environ.get("UMNICO_TOKEN"):
+        return _err("канал MAX не подключён (нет UMNICO_TOKEN) — не обещай клиенту MAX, "
+                    "предложи материалы ссылкой прямо в Авито")
+    номер = нормализовать_номер(args.get("phone") or "")
+    if not номер:
+        return _err(f"не похоже на российский мобильный: {args.get('phone')!r} — переспроси номер")
+    текст = (args.get("text") or "").strip()
+    if not текст:
+        return _err("пустой текст")
+    if MODE != "send":
+        return _ok({"режим": MODE, "номер": номер, "не_отправлено": True, "текст": текст})
+    try:
+        у = Umnico()
+        try:
+            итог = у.отправить(номер, текст)
+        finally:
+            у.close()
+    except UmnicoError as e:
+        return _err(f"MAX не принял: {e}")
+    except Exception as e:  # noqa: BLE001
+        return _err(str(e))
+    _sent.append({"chat_id": args.get("chat_id"), "text": f"[MAX +{номер}] {текст}", "канал": "max"})
+    if args.get("deal_id"):
+        try:
+            bitrix().timeline_comment_add(
+                args["deal_id"],
+                f"#MAX · отправлено на +{номер} ({итог['как']}) · {datetime.now(МСК):%d.%m %H:%M}\n\n{текст}",
+            )
+        except Exception:  # noqa: BLE001 — комментарий не важнее отправки
+            pass
+    return _ok(итог)
+
+
 def отправленные() -> list[dict]:
     """Факты отправки за прогон — для сверки отчёта с данными (код O01)."""
     return list(_sent)
@@ -845,6 +895,7 @@ def отправленные() -> list[dict]:
         b24_task_list,
         b24_call,
         telegram_alert,
+        max_send,
     ],
 )
 
@@ -864,4 +915,5 @@ def отправленные() -> list[dict]:
     "mcp__gektar__b24_task_list",
     "mcp__gektar__b24_call",
     "mcp__gektar__telegram_alert",
+    "mcp__gektar__max_send",
 ]
