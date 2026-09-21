@@ -106,7 +106,7 @@ import threading  # noqa: E402
 threading.Thread(target=данные.обновлять_в_фоне, daemon=True, name="дашборд-кэш").start()
 
 
-@app.get("/здоровье")
+@app.get("/health")
 async def здоровье() -> dict:
     return {"ок": True}
 
