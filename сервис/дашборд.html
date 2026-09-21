@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Агент продаж · дашборд</title>
+<style>
+  :root{
+    --bg:#1e1c1a;--card:#2a2725;--card-2:#332f2c;--line:#3d3834;--ink:#f3ead8;--ink-2:#bfb5a3;--muted:#8f8677;
+    --gold:#e4b654;
+    --s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--s5:#d55181;--bad:#e66767;--good:#5fb85f;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 -apple-system,Inter,system-ui,sans-serif;padding:20px 16px 60px}
+  .wrap{max-width:1240px;margin:0 auto}
+  header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:18px}
+  h1{font-size:20px;margin:0;font-weight:600}
+  h1 small{display:block;font-size:12px;color:var(--ink-2);font-weight:400;margin-top:2px}
+  .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .seg{display:inline-flex;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .seg button{background:none;border:0;color:var(--ink-2);padding:7px 12px;cursor:pointer;font:inherit}
+  .seg button.on{background:var(--gold);color:var(--bg);font-weight:600}
+  .meta{color:var(--muted);font-size:12px}
+  a.out{color:var(--muted);font-size:12px;text-decoration:none;border:1px solid var(--line);padding:6px 10px;border-radius:8px}
+  .grid{display:grid;gap:12px}
+  .kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .kpi .l{font-size:12px;color:var(--ink-2)}
+  .kpi .v{font-size:26px;font-weight:600;margin-top:2px;letter-spacing:-.02em}
+  .kpi .d{font-size:12px;margin-top:2px;color:var(--muted)}
+  .d.up{color:var(--good)} .d.down{color:var(--bad)}
+  .cards{grid-template-columns:repeat(auto-fit,minmax(340px,1fr));margin-top:12px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;min-width:0}
+  .card h2{font-size:14px;margin:0 0 4px;font-weight:600}
+  .card .sub{font-size:12px;color:var(--muted);margin-bottom:10px}
+  .card.wide{grid-column:1/-1}
+  canvas{width:100%!important;height:240px!important}
+  .funnel{display:grid;gap:6px}
+  .fr{display:grid;grid-template-columns:150px 1fr 70px;align-items:center;gap:10px;font-size:13px}
+  .fr .bar{height:14px;background:var(--card-2);border-radius:4px;overflow:hidden}
+  .fr .bar i{display:block;height:100%;background:var(--s1);border-radius:4px}
+  .fr .n{text-align:right;color:var(--ink-2)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;color:var(--muted);font-weight:500;font-size:12px;padding:6px 6px;border-bottom:1px solid var(--line)}
+  td{padding:7px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+  td.r,th.r{text-align:right;white-space:nowrap}
+  .tag{display:inline-block;font-size:11px;padding:2px 7px;border-radius:99px;background:var(--card-2);color:var(--ink-2);white-space:nowrap}
+  .tag.warm{background:#2b3a2f;color:#8ed48e}.tag.check{background:#3b3220;color:var(--gold)}.tag.ok{background:#22402c;color:#8ed48e}.tag.no{background:#452626;color:#f0a0a0}
+  .empty{color:var(--muted);font-size:13px;padding:10px 0}
+  .err{background:#452626;color:#f0a0a0;padding:10px 12px;border-radius:10px;margin-bottom:12px;display:none}
+  .scroll{overflow-x:auto}
+  ul.lessons{margin:0;padding-left:18px}ul.lessons li{margin:4px 0}
+  @media (max-width:600px){.fr{grid-template-columns:110px 1fr 56px}canvas{height:200px!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Агент по продажам на Авито <small>Щёкинские берега · воронка «Прямые покупатели»</small></h1>
+    <div class="controls">
+      <div class="seg" id="период">
+        <button data-d="7">7 дней</button><button data-d="30" class="on">30 дней</button><button data-d="90">90 дней</button>
+      </div>
+      <span class="meta" id="обновлено">загрузка…</span>
+      <a class="out" href="/выйти">выйти</a>
+    </div>
+  </header>
+  <div class="err" id="ошибка"></div>
+
+  <div class="grid kpis" id="kpis"></div>
+
+  <div class="grid cards">
+    <div class="card wide">
+      <h2>Лиды и движение по воронке</h2>
+      <div class="sub">по дням: новые заявки, впервые дошедшие до «тёплого» (номер/созвон/встреча), продажи, отказы</div>
+      <canvas id="chLeads"></canvas>
+    </div>
+    <div class="card">
+      <h2>Расход на модель, $</h2>
+      <div class="sub">по дням, все контейнеры агента · <span id="месяц"></span></div>
+      <canvas id="chSpend"></canvas>
+    </div>
+    <div class="card">
+      <h2>Диалоги в Авито</h2>
+      <div class="sub">тронутых чатов за сутки, в скольких ответил клиент, отправлено сообщений · учёт с 21.09.2026</div>
+      <canvas id="chDialogs"></canvas>
+    </div>
+    <div class="card">
+      <h2>Воронка сейчас</h2>
+      <div class="sub">карточек на каждой стадии</div>
+      <div class="funnel" id="funnel"></div>
+    </div>
+    <div class="card">
+      <h2>Причины отказов за период</h2>
+      <div class="sub">по сделкам, ушедшим в «провалена»</div>
+      <div class="funnel" id="reasons"></div>
+    </div>
+    <div class="card wide">
+      <h2>Тёплые в работе</h2>
+      <div class="sub">от самой дальней стадии; «дней» — сколько карточка стоит на стадии без движения</div>
+      <div class="scroll"><table id="warm"></table></div>
+    </div>
+    <div class="card">
+      <h2>Продажи</h2>
+      <div class="sub">закрытые и в рассрочке, суммы по ДКП</div>
+      <div class="scroll"><table id="sales"></table></div>
+    </div>
+    <div class="card">
+      <h2>Обучение агента</h2>
+      <div class="sub">гипотезы в проверке и уроки последних дней (журнал обучения)</div>
+      <div id="learn"></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const C = {s1:css('--s1'),s2:css('--s2'),s3:css('--s3'),s4:css('--s4'),bad:css('--bad'),gold:css('--gold'),ink2:css('--ink-2'),line:css('--line'),muted:css('--muted')};
+Chart.defaults.color = C.ink2; Chart.defaults.borderColor = C.line; Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+const charts = {};
+const fmt = (n, d=0) => (n ?? 0).toLocaleString('ru-RU', {maximumFractionDigits:d});
+const dm = (s) => s ? `${s.slice(8,10)}.${s.slice(5,7)}` : '';
+const usd = (n) => '$' + fmt(n, 2);
+
+function line(id, labels, datasets, opts={}) {
+  if (charts[id]) charts[id].destroy();
+  charts[id] = new Chart(document.getElementById(id), {
+    type: opts.type || 'line',
+    data: { labels, datasets: datasets.map(d => ({ tension:.25, borderWidth:2, pointRadius:2.5, pointHoverRadius:5, fill:false, borderRadius:4, maxBarThickness:14, ...d })) },
+    options: {
+      responsive:true, maintainAspectRatio:false, interaction:{mode:'index', intersect:false},
+      plugins:{ legend:{display:datasets.length>1, labels:{boxWidth:10, boxHeight:10, usePointStyle:true}}, tooltip:{ callbacks: opts.tip ? {label: opts.tip} : {} } },
+      scales:{ x:{grid:{display:false}, ticks:{maxTicksLimit:10}}, y:{beginAtZero:true, grid:{color:C.line}, ticks:{precision:0, ...(opts.yTicks||{})}} }
+    }
+  });
+}
+
+function kpi(l, v, d, sub) {
+  const cls = d == null ? '' : d > 0 ? 'up' : d < 0 ? 'down' : '';
+  const dtxt = d == null ? (sub||'') : `${d>0?'+':''}${fmt(d, Math.abs(d)<10 && !Number.isInteger(d)?1:0)} к прошлому периоду${sub?' · '+sub:''}`;
+  return `<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div><div class="d ${cls}">${dtxt}</div></div>`;
+}
+
+function render(D) {
+  const I = D.итоги, P = D.итоги_прошлого_периода;
+  document.getElementById('обновлено').textContent = 'обновлено ' + new Date(D.обновлено).toLocaleString('ru-RU', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+  document.getElementById('kpis').innerHTML = [
+    kpi('Новых лидов', fmt(I.новых), I.новых - P.новых),
+    kpi('Стали тёплыми', fmt(I.тёплых), I.тёплых - P.тёплых, `${I.конверсия_в_тёплые}% от лидов`),
+    kpi('Продаж', fmt(I.продаж), I.продаж - P.продаж, `${I.конверсия_в_продажу}% от лидов`),
+    kpi('Отказов', fmt(I.отказов), null, `${P.отказов} в прошлом периоде`),
+    kpi('В работе сейчас', fmt(D.в_работе_всего), null, 'открытых карточек'),
+    kpi('Расход за период', usd(I.расход_usd), null, `на лид ${usd(I.расход_на_лид)} · на тёплого ${usd(I.расход_на_тёплого)}`),
+  ].join('');
+
+  const R = D.динамика, L = R.map(r => dm(r.дата));
+  line('chLeads', L, [
+    {label:'Новых лидов', data:R.map(r=>r.новых), borderColor:C.s1, backgroundColor:C.s1},
+    {label:'Стали тёплыми', data:R.map(r=>r.тёплых), borderColor:C.s3, backgroundColor:C.s3},
+    {label:'Продажи', data:R.map(r=>r.продаж), borderColor:C.s4, backgroundColor:C.s4},
+    {label:'Отказы', data:R.map(r=>r.отказов), borderColor:C.bad, backgroundColor:C.bad, borderDash:[4,3], pointRadius:0},
+  ]);
+  line('chSpend', L, [{label:'$ за день', data:R.map(r=>r.расход_usd), backgroundColor:C.s2, borderColor:C.s2}],
+       {type:'bar', tip:(c)=>` ${usd(c.parsed.y)} · запусков ${R[c.dataIndex].запусков}`, yTicks:{callback:(v)=>'$'+v}});
+  const м = D.расход_месяц || {};
+  document.getElementById('месяц').textContent = м.дней ? `за месяц ${usd(м.usd)} (${м.дней} дн., с ${dm(м.с_какого_дня)})` : 'за месяц: нет данных';
+  const hasDlg = R.some(r => r.диалогов != null);
+  line('chDialogs', L, [
+    {label:'Тронуто чатов', data:R.map(r=>r.диалогов), borderColor:C.s1, backgroundColor:C.s1},
+    {label:'Клиент ответил', data:R.map(r=>r.с_ответом), borderColor:C.s3, backgroundColor:C.s3},
+    {label:'Отправлено', data:R.map(r=>r.отправлено), borderColor:C.s2, backgroundColor:C.s2},
+  ]);
+  if (!hasDlg) document.getElementById('chDialogs').insertAdjacentHTML('beforebegin', '<div class="empty" id="dlgEmpty">Первые точки появятся после вечернего прогона 21.09 — данные копятся ежедневно.</div>');
+
+  const F = D.воронка, mx = Math.max(1, ...F.map(f=>f.сделок));
+  document.getElementById('funnel').innerHTML = F.map(f => `<div class="fr"><span>${f.название}</span><div class="bar"><i style="width:${Math.max(2,100*f.сделок/mx)}%;background:${f.стадия==='LOSE'?C.bad:f.стадия==='WON'||f.стадия==='UC_RASSROCHKA'?C.s4:C.s1}"></i></div><span class="n">${fmt(f.сделок)}${f.сумма?` · ${fmt(f.сумма/1000)}k`:''}</span></div>`).join('');
+
+  const RS = Object.entries(D.причины_отказов), rmx = Math.max(1, ...RS.map(([,n])=>n));
+  document.getElementById('reasons').innerHTML = RS.length ? RS.map(([k,n]) => `<div class="fr"><span>${k}</span><div class="bar"><i style="width:${100*n/rmx}%;background:${C.bad}"></i></div><span class="n">${n}</span></div>`).join('') : '<div class="empty">отказов за период нет</div>';
+
+  const W = D.тёплые;
+  document.getElementById('warm').innerHTML = W.length ? '<tr><th>Сделка</th><th>Стадия</th><th class="r">Дней</th><th class="r">Сумма</th></tr>' +
+    W.map(w => `<tr><td><a style="color:var(--ink);text-decoration:none" href="https://gektar.bitrix24.ru/crm/deal/details/${w.id}/" target="_blank">${w.название}</a></td><td><span class="tag warm">${w.стадия}</span></td><td class="r" style="color:${(w.дней_в_стадии??0)>3?'var(--bad)':'inherit'}">${w.дней_в_стадии ?? '—'}</td><td class="r">${w.сумма?fmt(w.сумма)+' ₽':'—'}</td></tr>`).join('') : '<tr><td class="empty">тёплых в работе нет</td></tr>';
+
+  const S = D.продажи, total = S.reduce((a,s)=>a+s.сумма,0);
+  document.getElementById('sales').innerHTML = S.length ? '<tr><th>Сделка</th><th>Статус</th><th class="r">Дата</th><th class="r">Сумма</th></tr>' +
+    S.map(s => `<tr><td><a style="color:var(--ink);text-decoration:none" href="https://gektar.bitrix24.ru/crm/deal/details/${s.id}/" target="_blank">${s.название}</a></td><td><span class="tag ${s.стадия==='Продано'?'ok':'check'}">${s.стадия}</span></td><td class="r">${dm(s.дата)}</td><td class="r">${fmt(s.сумма)} ₽</td></tr>`).join('') +
+    `<tr><td colspan="3" style="color:var(--muted)">итого</td><td class="r"><b>${fmt(total)} ₽</b></td></tr>` : '<tr><td class="empty">продаж пока нет</td></tr>';
+
+  const O = D.обучение, hyp = O.гипотезы || [], les = O.уроки || [];
+  const st = {'проверяю':'check','подтверждена':'ok','опровергнута':'no','снята':''};
+  document.getElementById('learn').innerHTML =
+    (hyp.length ? '<table>' + hyp.map(h => `<tr><td style="width:1%">№${h.номер}</td><td><span class="tag ${st[h.статус]||''}">${h.статус}</span></td><td>${h.текст}${h.метрика?`<div style="color:var(--muted);font-size:12px">метрика: ${h.метрика}</div>`:''}</td><td class="r">${dm(h.дата)}</td></tr>`).join('') + '</table>' : '<div class="empty">гипотез в журнале пока нет — первая появится после вечернего вывода</div>') +
+    (les.length ? '<div class="sub" style="margin-top:12px">Уроки</div><ul class="lessons">' + les.slice(0,8).map(l => `<li><span style="color:var(--muted)">${dm(l.дата)}</span> ${l.текст}</li>`).join('') + '</ul>' : '');
+}
+
+async function load(days) {
+  const err = document.getElementById('ошибка'); err.style.display = 'none';
+  document.getElementById('обновлено').textContent = 'загрузка…';
+  try {
+    const r = await fetch(`/api/данные?дней=${days}`, {cache:'no-store'});
+    const D = await r.json();
+    if (r.status === 202) { document.getElementById('обновлено').textContent = 'собираю данные из Битрикса, ~40 с…'; setTimeout(() => load(days), 5000); return; }
+    if (!r.ok || D.ошибка) throw new Error(D.ошибка || r.status);
+    document.getElementById('dlgEmpty')?.remove();
+    render(D);
+  } catch (e) { err.textContent = 'Не удалось загрузить данные: ' + e.message; err.style.display = 'block'; document.getElementById('обновлено').textContent = ''; }
+}
+document.querySelectorAll('#период button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#период button').forEach(x => x.classList.remove('on')); b.classList.add('on'); load(b.dataset.d);
+}));
+load(30);
+</script>
+</body>
+</html>
