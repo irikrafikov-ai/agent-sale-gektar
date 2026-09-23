@@ -364,5 +364,23 @@ if _текст_блока is None:
 проверить("есть запасной путь через result итогового сообщения",
           'getattr(message, "result", None)' in исходник, True)
 
+print("\n10. Кончились деньги на API — это авария, а не строка в отчёте (23.09)")
+import importlib.util as _iu2, re as _re2
+_src2 = (Path(__file__).parent / "прогон.py").read_text()
+_ns2: dict = {}
+_a0 = _src2.index("ПРИЗНАКИ_ПУСТОГО_БАЛАНСА = (")
+exec(_src2[_a0:_src2.index(")", _a0) + 1], _ns2)
+_a2 = _src2.index("def бюджет_кончился(")
+_b2 = _a2 + _re2.search(r"\n(?=\S)", _src2[_a2 + 1:]).start() + 1
+exec(_src2[_a2:_b2], _ns2)
+_бк = _ns2["бюджет_кончился"]
+проверить("«Credit balance is too low» опознаётся",
+          _бк("Claude Code returned an error result: Credit balance is too low (exit code: 1)"), True)
+проверить("quota exceeded опознаётся", _бк("Error: quota exceeded for org"), True)
+проверить("обычная ошибка не считается нехваткой денег", _бк("ReadTimeout: the read operation timed out"), False)
+проверить("пустая строка — не авария", _бк(""), False)
+проверить("алерт о балансе шлётся из вывода дня", "АГЕНТ ОСТАНОВЛЕН: кончились деньги" in _src2, True)
+проверить("ошибка модели запоминается для проверки", "последняя_ошибка = str(ошибка)" in _src2, True)
+
 print(f"\n{'ВСЁ ЗЕЛЁНОЕ' if not провалов else f'ПРОВАЛОВ: {провалов}'}")
 sys.exit(1 if провалов else 0)
