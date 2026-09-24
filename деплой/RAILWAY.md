@@ -10,6 +10,8 @@ Railway → сервис → **Variables**. Шаблон — `сервис/.env.
 
 | Переменная | Где взять |
 |---|---|
+| `AGENT_SDK_PROVIDER` | `openai` — OpenAI Agents SDK; `claude` — прежний раннер для отката |
+| `OPENAI_API_KEY` | platform.openai.com → API keys. Нужен при `AGENT_SDK_PROVIDER=openai` |
 | `ANTHROPIC_API_KEY` | console.anthropic.com → API Keys. Отдельный ключ, не подписка — тарифицируется по токенам |
 | `AVITO_CLIENT_ID` / `AVITO_CLIENT_SECRET` | Кабинет 1 «ГектарЪ». Авито → Профиль → Настройки → Клиенты и приложения. Права: `messenger:read`, `messenger:write`, `items:info`, `user:read` |
 | `AVITO2_CLIENT_ID` / `AVITO2_CLIENT_SECRET` | Кабинет 2 «Светлая долина», те же права. Необязательные: не заданы — второй кабинет отключён, инструменты отвечают понятной ошибкой. В инструментах Авито кабинет выбирается аргументом `account: gektar \| dolina` |
@@ -20,7 +22,13 @@ Railway → сервис → **Variables**. Шаблон — `сервис/.env.
 | `KB_TOKEN` | GitHub → fine-grained PAT с доступом на чтение к репозиторию базы знаний |
 | `AGENT_MODE` | `send` — агент пишет клиентам сам |
 
-Необязательные: `AGENT_MODEL` (по умолчанию `claude-opus-5`), `AGENT_MAX_TURNS` (200).
+Модели OpenAI: `OPENAI_AGENT_MODEL`, `OPENAI_AGENT_MODEL_ЧАТ`,
+`OPENAI_AGENT_MODEL_ВЫВОД` (по умолчанию: полный прогон `gpt-6-sol`, чат и
+вывод дня `gpt-6-astra`). Для старого раннера:
+`AGENT_MODEL`. Общий лимит — `AGENT_MAX_TURNS` (200).
+
+Переключайте раннер только после добавления `OPENAI_API_KEY`. Без ключа
+проверка окружения остановит прогон до любых действий с клиентами.
 
 ---
 

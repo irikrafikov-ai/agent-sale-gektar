@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from claude_agent_sdk import create_sdk_mcp_server, tool
+from claude_agent_sdk import create_sdk_mcp_server, tool as _claude_tool
 
 from интеграции.avito import Avito
 from интеграции.bitrix import Bitrix
@@ -35,6 +35,27 @@ from интеграции.umnico import Umnico, UmnicoError, нормализо�
 # а сюда клиент приходит уже тогда, когда он действительно нужен.
 
 _клиенты: dict[str, object] = {}
+
+# Реестр исходных обработчиков нужен второму раннеру. Claude Agent SDK
+# превращает функцию в MCP-описание своим декоратором, а OpenAI Agents SDK
+# ожидает FunctionTool. Храним исходную async-функцию и её схему один раз,
+# чтобы оба SDK вызывали один и тот же код со всеми стоп-кранами ниже.
+ОБРАБОТЧИКИ: dict[str, dict[str, Any]] = {}
+
+
+def tool(имя: str, описание: str, схема: dict[str, type]):
+    """Совместимый декоратор: MCP для Claude + реестр для OpenAI SDK."""
+
+    def обернуть(функция):
+        ОБРАБОТЧИКИ[имя] = {
+            "name": имя,
+            "description": описание,
+            "schema": схема,
+            "handler": функция,
+        }
+        return _claude_tool(имя, описание, схема)(функция)
+
+    return обернуть
 
 
 def avito() -> Avito:

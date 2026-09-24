@@ -64,6 +64,11 @@ from интеграции.telegram import Telegram  # noqa: E402
 МСК = timezone(timedelta(hours=3))
 
 
+def openai_режим() -> bool:
+    """Agents SDK включается явно: без ключа боевой сервис не переключаем."""
+    return os.environ.get("AGENT_SDK_PROVIDER", "claude").strip().lower() == "openai"
+
+
 def обновить_базу_знаний() -> str:
     """Клонирует или обновляет репозиторий базы знаний. Возвращает статус для отчёта."""
     url = os.environ.get("KB_REPO_URL")
@@ -1169,38 +1174,38 @@ async def прогон(вид: str, каб: dict, chat_id: str | None = None, п
     # Модель печатаем в лог. 22.08 полные прогоны перевели на Sonnet ради
     # расхода, и выяснилось, что проверить переключение нечем: ни в логе, ни в
     # отчёте модели не было. Сравнивать качество «до и после» вслепую нельзя.
-    модель = (
-        os.environ.get("AGENT_MODEL_ЧАТ", "claude-sonnet-5")
-        if chat_id
-        else os.environ.get("AGENT_MODEL", "claude-opus-5")
-    )
+    if openai_режим():
+        модель = (
+            os.environ.get("OPENAI_AGENT_MODEL_ЧАТ", "gpt-6-astra")
+            if chat_id
+            else os.environ.get("OPENAI_AGENT_MODEL", "gpt-6-sol")
+        )
+    else:
+        модель = (
+            os.environ.get("AGENT_MODEL_ЧАТ", "claude-sonnet-5")
+            if chat_id
+            else os.environ.get("AGENT_MODEL", "claude-opus-5")
+        )
     print(
         f"[{datetime.now(МСК):%H:%M:%S}] модель: {модель} · "
         f"кабинет: {каб['ключ']} · вид: {вид}",
         flush=True,
     )
 
-    options = ClaudeAgentOptions(
-        model=модель,
-        cwd=str(КОРЕНЬ),
-        mcp_servers={"gektar": инструменты.сервер},
-        allowed_tools=(
-            _инструменты_чата()
-            if chat_id
-            else ["Read", "Glob", "Grep", "Write", "Edit"] + инструменты.ИМЕНА
-        ),
-        permission_mode="bypassPermissions",
-        max_turns=int(
-            # 12, а не 40. Контекст растёт от хода к ходу, и каждый следующий
-            # перечитывает всё предыдущее — расход по чтению кэша квадратичный.
-            # На честный разбор (история → Битрикс → отправка) хватает 5–8;
-            # 40 оплачивали хвост, который ничего не решал. Упрётся в потолок —
-            # завершится с тем, что успел, а недоотвеченный чат подберёт сторож.
-            os.environ.get("AGENT_MAX_TURNS_ЧАТ", "12")
-            if chat_id
-            else os.environ.get("AGENT_MAX_TURNS", "200")
-        ),
-        system_prompt={"type": "preset", "preset": "claude_code"},
+    имена_инструментов = (
+        _инструменты_чата()
+        if chat_id
+        else ["Read", "Glob", "Grep", "Write", "Edit"] + инструменты.ИМЕНА
+    )
+    максимум_ходов = int(
+        # 12, а не 40. Контекст растёт от хода к ходу, и каждый следующий
+        # перечитывает всё предыдущее — расход по чтению кэша квадратичный.
+        # На честный разбор (история → Битрикс → отправка) хватает 5–8;
+        # 40 оплачивали хвост, который ничего не решал. Упрётся в потолок —
+        # завершится с тем, что успел, а недоотвеченный чат подберёт сторож.
+        os.environ.get("AGENT_MAX_TURNS_ЧАТ", "12")
+        if chat_id
+        else os.environ.get("AGENT_MAX_TURNS", "200")
     )
 
     if chat_id:
@@ -1225,6 +1230,32 @@ async def прогон(вид: str, каб: dict, chat_id: str | None = None, п
     последний = ""
     расход: dict = {}
     try:
+        if openai_режим():
+            import openai_sdk
+
+            результат = await openai_sdk.выполнить(
+                текст_задания,
+                модель=модель,
+                имена_инструментов=имена_инструментов,
+                максимум_ходов=максимум_ходов,
+            )
+            последний = результат["text"]
+            расход["usage"] = результат["usage"]
+            расход["итог"] = результат["итог"]
+            расход["usd"] = результат["usd"]
+            расход["след"] = ("OpenAI RunResult", ["final_output", "usage"])
+            печать_расхода(расход, модель, вид, каб["ключ"])
+            return последний
+
+        options = ClaudeAgentOptions(
+            model=модель,
+            cwd=str(КОРЕНЬ),
+            mcp_servers={"gektar": инструменты.сервер},
+            allowed_tools=имена_инструментов,
+            permission_mode="bypassPermissions",
+            max_turns=максимум_ходов,
+            system_prompt={"type": "preset", "preset": "claude_code"},
+        )
         async for message in query(prompt=текст_задания, options=options):
             # Итоговые счётчики приходят в финальном сообщении результата.
             # Тип не фиксируем — берём по атрибутам, чтобы правка пережила
@@ -1353,12 +1384,20 @@ async def повествование_дня(
     # поэтому здесь самая сильная модель (предложение Ирика 18.09.2026:
     # Fable 5.1). Стоит это доли доллара за вечер. Если Fable недоступна
     # или вернула пустоту — второй заход на Opus, чтобы вывод был всегда.
-    модели = [
-        м for м in (
-            os.environ.get("AGENT_MODEL_ВЫВОД", "claude-fable-5-1"),
-            os.environ.get("AGENT_MODEL_ВЫВОД_ЗАПАС", "claude-opus-5"),
-        ) if м
-    ]
+    if openai_режим():
+        модели = [
+            м for м in (
+                os.environ.get("OPENAI_AGENT_MODEL_ВЫВОД", "gpt-6-astra"),
+                os.environ.get("OPENAI_AGENT_MODEL_ВЫВОД_ЗАПАС", "gpt-6-astra"),
+            ) if м
+        ]
+    else:
+        модели = [
+            м for м in (
+                os.environ.get("AGENT_MODEL_ВЫВОД", "claude-fable-5-1"),
+                os.environ.get("AGENT_MODEL_ВЫВОД_ЗАПАС", "claude-opus-5"),
+            ) if м
+        ]
     модель = модели[0]
 
     # Журнал обучения — что проверял и чему учился в прошлые дни.
@@ -1485,6 +1524,36 @@ async def повествование_дня(
     последняя_ошибка = ""
     for модель in модели:
         try:
+            if openai_режим():
+                import openai_sdk
+
+                результат = await openai_sdk.выполнить(
+                    задание_текста,
+                    модель=модель,
+                    имена_инструментов=[],
+                    максимум_ходов=int(os.environ.get("AGENT_MAX_TURNS_ВЫВОД", "4")),
+                    имя="Автор вечернего отчёта ГектарЪ",
+                )
+                текст = результат["text"]
+                u = результат["usage"]
+                usd = результат["usd"]
+                print(
+                    f"[{datetime.now(МСК):%H:%M:%S}] текст отчёта · {модель} · "
+                    f"вход {u.get('input_tokens', 0)} · выход {u.get('output_tokens', 0)}"
+                    + (f" · ${usd:.2f}" if usd is not None else ""),
+                    flush=True,
+                )
+                if usd is not None:
+                    расход.записать(usd, "отчёт", "оба", модель)
+                if текст.strip():
+                    return текст.strip()
+                print(
+                    f"[отчёт] модель {модель} вернула пустой текст — "
+                    + ("пробую запасную" if модель != модели[-1] else "вывода не будет"),
+                    file=sys.stderr,
+                )
+                continue
+
             options = ClaudeAgentOptions(
                 model=модель,
                 cwd=str(КОРЕНЬ),
@@ -1540,12 +1609,14 @@ async def повествование_дня(
     # клиентам по вебхуку, — про это сообщаем сразу, как про падение сервера.
     if бюджет_кончился(последняя_ошибка):
         try:
+            провайдер = "OpenAI" if openai_режим() else "Anthropic"
+            биллинг = "platform.openai.com → Billing" if openai_режим() else "console.anthropic.com → Billing"
             Telegram().send(
-                "🔴 *АГЕНТ ОСТАНОВЛЕН: кончились деньги на API Anthropic*\n\n"
+                f"🔴 *АГЕНТ ОСТАНОВЛЕН: кончились деньги на API {провайдер}*\n\n"
                 f"`{кратко(последняя_ошибка)}`\n\n"
                 "Вывод дня не написан, гипотезы за сегодня не проверены. "
                 "Ответы клиентам по вебхуку тоже не работают.\n"
-                "Пополните баланс: console.anthropic.com → Billing.",
+                f"Пополните баланс: {биллинг}.",
                 alert=True,
             )
         except Exception as ошибка_алерта:  # noqa: BLE001
@@ -1588,6 +1659,7 @@ def запасной_отчёт(отправлено: list[dict]) -> str:
 
 ОБЯЗАТЕЛЬНЫЕ = {
     "ANTHROPIC_API_KEY": "ключ Anthropic (console.anthropic.com → API Keys)",
+    "OPENAI_API_KEY": "ключ OpenAI (platform.openai.com → API keys)",
     "AVITO_CLIENT_ID": "Авито → Настройки → Клиенты и приложения",
     "AVITO_CLIENT_SECRET": "там же, рядом с client_id",
     "BITRIX_WEBHOOK": "Битрикс → Разработчикам → Входящий вебхук",
@@ -1602,7 +1674,9 @@ def проверить_переменные() -> list[str]:
     Без этой проверки процесс падал сырым KeyError на первой же отсутствующей
     переменной: чинишь одну, деплоишь, узнаёшь про следующую.
     """
-    return [имя for имя in ОБЯЗАТЕЛЬНЫЕ if not os.environ.get(имя)]
+    модельный_ключ = "OPENAI_API_KEY" if openai_режим() else "ANTHROPIC_API_KEY"
+    общие = [имя for имя in ОБЯЗАТЕЛЬНЫЕ if имя not in {"OPENAI_API_KEY", "ANTHROPIC_API_KEY"}]
+    return [имя for имя in [модельный_ключ, *общие] if not os.environ.get(имя)]
 
 
 def main() -> int:
@@ -1808,11 +1882,18 @@ def main() -> int:
     # «модель» из прогона() сюда не видна. 25.08 подпись с ней уронила
     # ВСЕ чат-разборы на самом финале — сообщение клиенту уже ушло, а процесс
     # умирал кодом 1, и сторож честно брал чат в разбор снова.
-    модель_ = (
-        os.environ.get("AGENT_MODEL_ЧАТ", "claude-sonnet-5")
-        if chat_id
-        else os.environ.get("AGENT_MODEL", "claude-opus-5")
-    )
+    if openai_режим():
+        модель_ = (
+            os.environ.get("OPENAI_AGENT_MODEL_ЧАТ", "gpt-6-astra")
+            if chat_id
+            else os.environ.get("OPENAI_AGENT_MODEL", "gpt-6-sol")
+        )
+    else:
+        модель_ = (
+            os.environ.get("AGENT_MODEL_ЧАТ", "claude-sonnet-5")
+            if chat_id
+            else os.environ.get("AGENT_MODEL", "claude-opus-5")
+        )
     подпись = (
         f"\n\n---\n_{каб['название']} · разбор по вебхуку, чат {chat_id}, "
         f"отправлено: {len(отправлено)} · модель: {модель_}_"
