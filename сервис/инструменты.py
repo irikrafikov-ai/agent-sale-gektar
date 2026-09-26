@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -638,12 +639,52 @@ async def b24_crm_get(args: dict) -> dict:
         return _err(str(e))
 
 
-@tool("b24_crm_add", "Создать сущность CRM. fields — JSON-строка", {"entity": str, "fields": str})
+_ЧАТ_В_ТЕКСТЕ = re.compile(r"u2i-[A-Za-z0-9_~\-]{10,}")
+
+
+@tool(
+    "b24_crm_add",
+    "Создать сущность CRM. fields — JSON-строка. Сделку по чату Авито "
+    "ОБЯЗАТЕЛЬНО привязывай к чату: передай chat_id или положи ORIGIN_ID в "
+    "fields — иначе дедуп не найдёт карточку и назавтра заведётся вторая.",
+    {"entity": str, "fields": str, "chat_id": str},
+)
 async def b24_crm_add(args: dict) -> dict:
+    """Создать карточку — и не дать ей потеряться без привязки к чату.
+
+    26.09.2026: у Андрея оказалось две сделки по одному чату (3363 и 3989),
+    потому что первая была заведена без ORIGIN_ID — поиск по чату её не
+    видел. Таких «слепых» карточек в воронке набралось полтора десятка,
+    включая тёплых с телефоном. Поэтому привязку теперь проставляет сам
+    инструмент: из chat_id или из названия, где чат почти всегда назван.
+    """
+    поля = _json_arg(args["fields"], {})
+    сущность = args.get("entity", "deal")
+    привязка = None
+    if сущность == "deal" and not (поля.get("ORIGIN_ID") or "").strip():
+        чат = (args.get("chat_id") or "").strip()
+        if not чат:
+            найдено = _ЧАТ_В_ТЕКСТЕ.search(str(поля.get("TITLE") or ""))
+            чат = найдено.group(0) if найдено else ""
+        if чат:
+            поля["ORIGIN_ID"] = чат
+            поля["ORIGINATOR_ID"] = поля.get("ORIGINATOR_ID") or "avito"
+            привязка = чат
     try:
-        return _ok({"id": bitrix().crm_add(args.get("entity", "deal"), _json_arg(args["fields"], {}))})
+        ид = bitrix().crm_add(сущность, поля)
     except Exception as e:
         return _err(str(e))
+    итог = {"id": ид}
+    if привязка:
+        итог["привязано_к_чату"] = привязка
+    elif сущность == "deal" and not (поля.get("ORIGIN_ID") or "").strip():
+        итог["без_привязки_к_чату"] = True
+        итог["пояснение"] = (
+            "Сделка создана, но не привязана к чату Авито: дедуп по чату её не найдёт, "
+            "и по этому же человеку заведётся вторая карточка. Если лид из чата — "
+            "допиши ORIGIN_ID через b24_crm_update."
+        )
+    return _ok(итог)
 
 
 @tool(
