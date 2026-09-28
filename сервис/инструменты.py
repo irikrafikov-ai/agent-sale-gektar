@@ -26,7 +26,8 @@ from claude_agent_sdk import create_sdk_mcp_server, tool as _claude_tool
 from интеграции.avito import Avito
 from интеграции.bitrix import Bitrix
 from интеграции.telegram import Telegram
-from интеграции.umnico import Umnico, UmnicoError, нормализовать_номер, НОМЕР_КАНАЛА
+from интеграции.umnico import (Umnico, UmnicoError, нормализовать_номер, НОМЕР_КАНАЛА,
+                               почему_не_ушло)
 
 # Клиенты создаются лениво, при первом обращении.
 #
@@ -969,7 +970,21 @@ async def max_send(args: dict) -> dict:
         # Телеграм может не пустить «первым» по номеру. Клиенту уже назван
         # канал словами, поэтому молча уходить в другой нельзя — пусть агент
         # решит сам: переспросить номер, предложить MAX или дать ссылку в Авито.
-        return _err(f"{назв} не принял: {e}")
+        причина = почему_не_ушло(str(e))
+        # Разлогиненный канал — это поломка сервиса, а не сложность этого чата:
+        # молча она съест все обещания фото до тех пор, пока Ирик не переподключит.
+        if "разлогинена" in причина:
+            try:
+                telegram().send(
+                    "🔌 *Канал MAX в Umnico разлогинен*\n\n"
+                    f"`{str(e)[:200]}`\n\n"
+                    "Отправка фото и сообщений клиентам через MAX не работает. "
+                    "Переподключите канал в Umnico — до этого агент материалы не обещает.",
+                    alert=True,
+                )
+            except Exception:  # noqa: BLE001 — алерт не важнее ответа агенту
+                pass
+        return _err(f"{назв} не принял: {e}" + (f" — {причина}" if причина else ""))
     except Exception as e:  # noqa: BLE001
         return _err(str(e))
     метка = "MAX" if канал == "max" else "Телеграм"
