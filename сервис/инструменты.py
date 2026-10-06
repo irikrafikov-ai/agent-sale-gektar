@@ -272,6 +272,8 @@ def _лид_без_клиента(args: dict) -> str | None:
 
 from правила import ПРОСЬБА_НЕ_ПИСАТЬ, просил_не_писать, служебное_авито, жёсткий_запрет  # noqa: E402,F401
 import отказники  # noqa: E402
+import инвентарь  # noqa: E402
+import кабинеты  # noqa: E402
 
 
 def _чужое_исходящее(cli, chat_id: str) -> dict | None:
@@ -506,6 +508,9 @@ async def avito_send_message(args: dict) -> dict:
     if MODE != "send":
         return _err(f"режим {MODE}: отправка клиентам отключена, сообщение НЕ ушло")
 
+    if (проблема := инвентарь.проверить_предложение(args.get("text", ""), кабинеты.кабинет(args.get("account") or "gektar"))):
+        return _err("СТОП-КРАН НАЛИЧИЯ: " + проблема + " Сообщение НЕ отправлено.")
+
     # Стоп-кран темпа. До 16.08 он существовал только в тексте регламента —
     # и в тот день был превышен: 29 сообщений за семь минут, не меньше 33 за
     # час при потолке 30. Правило, которое проверяет только сам агент, рано или
@@ -637,6 +642,16 @@ async def avito_item_info(args: dict) -> dict:
         return _ok(_avito(args).item_info(args["item_id"]))
     except Exception as e:
         return _err(str(e))
+
+
+@tool("plot_inventory", "Живая шахматка: текущие номера, статусы, площади и цены. Вызывай перед подбором и конкретным предложением. account: gektar | dolina", {"account": str})
+async def plot_inventory(args: dict) -> dict:
+    try:
+        каб = кабинеты.кабинет(args.get("account") or "gektar")
+        return _ok({"source": каб.get("шахматка"), "checked_at": datetime.now(МСК).isoformat(),
+                    "plots": list(инвентарь.загрузить(каб, свежая=True).values())})
+    except Exception:
+        return _err("Живая шахматка недоступна. Номера, наличие и цены не называй по памяти; повтори проверку позже.")
 
 
 # --- Битрикс -------------------------------------------------------------
@@ -1066,6 +1081,7 @@ def отправленные() -> list[dict]:
         avito_chat_messages,
         avito_send_message,
         avito_item_info,
+        plot_inventory,
         handoff_chat,
         avito_calls,
         b24_crm_list,
@@ -1086,6 +1102,7 @@ def отправленные() -> list[dict]:
     "mcp__gektar__avito_chat_messages",
     "mcp__gektar__avito_send_message",
     "mcp__gektar__avito_item_info",
+    "mcp__gektar__plot_inventory",
     "mcp__gektar__handoff_chat",
     "mcp__gektar__avito_calls",
     "mcp__gektar__b24_crm_list",

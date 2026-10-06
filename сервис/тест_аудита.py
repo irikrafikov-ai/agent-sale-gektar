@@ -40,7 +40,8 @@ class BitrixFake:
         return True
 
     def call(self, *args):
-        raise AssertionError("Direct REST must not bypass the update guard")
+        self.writes.append(args[1].get("fields", {}))
+        return True
 
 
 class AvitoFake:
@@ -72,12 +73,12 @@ class AuditRegression(unittest.TestCase):
                 return asyncio.run(tools.b24_call({"method": "crm.deal.update", "params": json.dumps({"id": 42, "fields": {"STAGE_ID": stage}})}))
             return asyncio.run(tools.b24_crm_update(args))
 
-    def send(self, client):
+    def send(self, client, text="Добрый день 🙂 Расскажу подробнее."):
         with patch.object(tools, "MODE", "send"), patch.object(tools, "_avito", return_value=client), \
                 patch.object(tools, "_темп_позволяет", return_value=True), \
                 patch.object(tools.отказники, "запрещён", return_value=None), \
                 patch.object(tools.отказники, "добавить", return_value=True) as registry:
-            result = asyncio.run(tools.avito_send_message({"chat_id": "test", "text": "Добрый день 🙂 Расскажу подробнее."}))
+            result = asyncio.run(tools.avito_send_message({"chat_id": "test", "text": text}))
             return result, registry.call_count
 
     def test_no_sales_stage_regression(self):
@@ -155,6 +156,31 @@ class AuditRegression(unittest.TestCase):
                  "клиент_кабинета": lambda *a: c, "лог": lambda *a: None}
         exec(compile(ast.Module(body=[node], type_ignores=[]), "template-test", "exec"), scope)
         scope["отправить_шаблон"]("test", {"шаблон": "Template"})
+        self.assertEqual(c.sent, [])
+
+    def test_inventory_blocks_model_send_but_allows_true_status(self):
+        rows = {3: {"номер": 3, "статус": "Продан", "доступен": False},
+                36: {"номер": 36, "статус": "Забронирован", "доступен": False}}
+        for text, blocked in (("Предлагаю №3.", True), ("№36 свободен.", True), ("№3 продан.", False)):
+            with self.subTest(text=text), patch.object(tools.инвентарь, "загрузить", return_value=rows):
+                c = AvitoFake()
+                result, _ = self.send(c, text)
+                self.assertEqual(bool(result.get("is_error")), blocked)
+                self.assertEqual(len(c.sent), 0 if blocked else 1)
+
+    def test_inventory_blocks_direct_template_send(self):
+        import правила
+        tree = ast.parse((Path(__file__).parent / "вебхук.py").read_text())
+        node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "отправить_шаблон")
+        c = AvitoFake()
+        scope = {"имя_клиента": lambda *a: "", "темп_позволяет": lambda: True,
+                 "клиент_кабинета": lambda *a: c, "лог": lambda *a: None,
+                 "битрикс_запрещает": lambda *a: (False, ""), "РЕЖИМ": "send",
+                 "правила": правила, "инвентарь": tools.инвентарь,
+                 "реестр": types.SimpleNamespace(кабинет=lambda *a: {"avito_user_id": c.user_id}, ШАБЛОН_ВОПРОС="Посмотрели?")}
+        exec(compile(ast.Module(body=[node], type_ignores=[]), "template-test", "exec"), scope)
+        with patch.object(tools.инвентарь, "загрузить", return_value={3: {"статус": "Продан", "доступен": False}}):
+            scope["отправить_шаблон"]("test", {"шаблон": "Предлагаю №3.", "ключ": "gektar", "тур": "https://example.invalid"})
         self.assertEqual(c.sent, [])
 
 

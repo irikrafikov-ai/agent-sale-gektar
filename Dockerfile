@@ -34,7 +34,8 @@ ENV PYTHONUNBUFFERED=1 \
 # Ошибка импорта должна остановить сборку, а не уже работающий вебхук.
 RUN python -c "import инструменты, вебхук, openai_sdk" \
     && python сервис/тест_openai_sdk.py \
-    && python сервис/тест_аудита.py
+    && python сервис/тест_аудита.py \
+    && python сервис/тест_инвентаря.py
 
 # Работаем не от root. Это не гигиена, а обязательное условие: Claude Code
 # отказывается запускаться с --dangerously-skip-permissions под root, а именно

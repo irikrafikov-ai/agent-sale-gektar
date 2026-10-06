@@ -27,7 +27,7 @@ except ModuleNotFoundError as нет_модуля:
 
 
 async def main() -> None:
-    assert len(openai_sdk.инструменты_модуля) == 16
+    assert len(openai_sdk.инструменты_модуля) == 17
     выбранные = openai_sdk.инструменты(
         ["Read", "mcp__gektar__avito_chat_messages"]
     )
@@ -58,7 +58,7 @@ async def main() -> None:
     )
     # Long-context Astra: 700k×$20 + 200k×$2 + 100k×$25 + 100k×$75.
     assert openai_sdk._стоимость("gpt-6-astra", usage) == 24.4
-    print("OpenAI Agents SDK: 16 инструментов и границы файлов — зелёные")
+    print("OpenAI Agents SDK: 17 инструментов и границы файлов — зелёные")
 
 
 if __name__ == "__main__":
