@@ -117,7 +117,9 @@ class Avito:
             f"/messenger/v3/accounts/{self.user_id}/chats/{chat_id}/messages/",
             params={"limit": limit, "offset": offset},
         )
-        return data.get("messages", data if isinstance(data, list) else [])
+        if isinstance(data, list):
+            return data
+        return data.get("messages", [])
 
     def send_message(self, chat_id: str, text: str) -> dict:
         """ЗАПИСЬ. Отправляет сообщение реальному клиенту.

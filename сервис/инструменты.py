@@ -270,7 +270,7 @@ def _лид_без_клиента(args: dict) -> str | None:
     )
 
 
-from правила import ПРОСЬБА_НЕ_ПИСАТЬ, просил_не_писать, служебное_авито  # noqa: E402,F401
+from правила import ПРОСЬБА_НЕ_ПИСАТЬ, просил_не_писать, служебное_авито, жёсткий_запрет  # noqa: E402,F401
 import отказники  # noqa: E402
 
 
@@ -284,8 +284,8 @@ def _чужое_исходящее(cli, chat_id: str) -> dict | None:
     """
     try:
         msgs = cli.chat_messages(chat_id, limit=10)
-    except Exception:
-        return None  # сеть подвела — не мешаем отправке, это не наша забота
+    except Exception as exc:
+        raise RuntimeError("Не удалось перечитать чат перед отправкой") from exc
 
     me = cli.user_id
     # Служебные Авито из расчёта ИСКЛЮЧЕНЫ: они не общение, а техника.
@@ -522,8 +522,8 @@ async def avito_send_message(args: dict) -> dict:
 
     try:
         история = cli.chat_messages(args["chat_id"], limit=50)
-    except Exception:  # noqa: BLE001 — сеть подвела, остальные краны отработают
-        история = []
+    except Exception:
+        return _err("СТОП-КРАН: история чата недоступна. Сообщение НЕ отправлено; повтори проверку позже.")
     # Запрет действует по ЧЕЛОВЕКУ, а не по одному чату. 29.09.2026 Андрею
     # Гореликову ушло сообщение во второй его чат, хотя с 12.08 у него стоит
     # НЕ ПИСАТЬ: старый чат Авито уже не отдаёт в списке, и сверка «вторая
@@ -540,6 +540,13 @@ async def avito_send_message(args: dict) -> dict:
 
     if (просьба := просил_не_писать(история, cli.user_id)):
         цитата = ((просьба.get("content") or {}).get("text") or "")[:200]
+        if not жёсткий_запрет(просьба):
+            return _err(
+                "СТОП-КРАН: последнее слово клиента — отказ от предложения. "
+                "Сообщение НЕ отправлено. Это не пожизненный запрет по человеку: "
+                "не добавляй НЕ ПИСАТЬ и не заноси в реестр отказников. "
+                "Если клиент сам продолжит разговор, ответь на новый вопрос."
+            )
         # Переносим запрет с чата на человека: у него могут быть другие чаты,
         # и в них правило обязано действовать так же.
         if собеседник:
@@ -563,7 +570,10 @@ async def avito_send_message(args: dict) -> dict:
             "и дальше зови человека так, как он ответит."
         )
 
-    чужое = _чужое_исходящее(cli, args["chat_id"])
+    try:
+        чужое = _чужое_исходящее(cli, args["chat_id"])
+    except Exception:
+        return _err("СТОП-КРАН: повторная проверка чата недоступна. Сообщение НЕ отправлено; повтори позже.")
     if чужое is not None:
         текст = (чужое.get("content") or {}).get("text", "")
         return _err(
@@ -721,6 +731,21 @@ async def b24_crm_update(args: dict) -> dict:
     if беда:
         return _err(беда)
 
+    # Добытый телефон, состоявшийся звонок или бронь не исчезают от тишины
+    # в чате. Проверка стоит непосредственно перед записью, а не в промпте.
+    if args.get("entity", "deal") == "deal" and поля.get("STAGE_ID") in {"NEW", "EXECUTING", "PREPARATION"}:
+        try:
+            текущая = bitrix().crm_get("deal", args["id"])
+        except Exception:
+            return _err("СТОП-КРАН: текущая стадия недоступна, переход не выполнен. Повтори проверку позже.")
+        поздние = {"UC_CONTACT", "UC_CALL_DONE", "UC_MEET_SET", "UC_MEET_DONE",
+                   "FINAL_INVOICE", "UC_DOGOVOR", "UC_RASSROCHKA", "WON"}
+        if str(текущая.get("CATEGORY_ID", 0)) == "0" and текущая.get("STAGE_ID") in поздние:
+            return _err(
+                f"СТОП-КРАН: нельзя автоматически откатить {текущая['STAGE_ID']} в {поля['STAGE_ID']}. "
+                "Сохрани достигнутую стадию; изменение подтверждённых фактов требует разбора Ириком."
+            )
+
     try:
         итог = bitrix().crm_update(args.get("entity", "deal"), args["id"], поля)
     except Exception as e:
@@ -811,7 +836,14 @@ async def b24_task_list(args: dict) -> dict:
 @tool("b24_call", "Произвольный метод REST Битрикса. params — JSON-строка", {"method": str, "params": str})
 async def b24_call(args: dict) -> dict:
     try:
-        return _ok(bitrix().call(args["method"], _json_arg(args.get("params"), {})))
+        params = _json_arg(args.get("params"), {})
+        if args["method"].lower() == "crm.deal.update":
+            return await ОБРАБОТЧИКИ["b24_crm_update"]["handler"]({
+                "entity": "deal", "id": str(params.get("id", params.get("ID", ""))),
+                "fields": json.dumps(params.get("fields", params.get("FIELDS", {})), ensure_ascii=False),
+                "причина_словами_клиента": params.get("причина_словами_клиента", ""),
+            })
+        return _ok(bitrix().call(args["method"], params))
     except Exception as e:
         return _err(str(e))
 

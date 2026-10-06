@@ -499,6 +499,9 @@ _вотчёт: list = []
 class _КлиОтправка:
     user_id = 84069402
 
+    def chat_messages(self, chat_id, limit=50):
+        return []
+
     def send_message(self, chat_id, text):
         _ушло.append(text)
         return {"id": "x"}
