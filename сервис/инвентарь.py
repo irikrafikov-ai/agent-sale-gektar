@@ -62,8 +62,8 @@ def загрузить(каб: dict, *, свежая: bool = False) -> dict[int,
 
 
 _НОМЕРА = re.compile(
-    r"(?P<prefix>№\s*|\bучаст(?:ок|ка|ки|ков|ку|ке|ком|кам|ками|ках)\s*(?:№\s*|номер(?:а|ом)?\s*)?)"
-    r"(?P<numbers>\d{1,4}(?:\s*(?:,|/|\bи\b|\bили\b)\s*(?:№\s*)?\d{1,4})*)(?!\d)", re.I)
+    r"(?P<prefix>№\s*|\bучаст(?:ок|ка|ки|ков|ку|ке|ком|кам|ками|ках)\s*(?:с[о]?\s+)?(?:№\s*|номер(?:а|ом)?\s*)?)"
+    r"(?P<numbers>\d{1,4}(?:\s*(?:,|/|[-–—]|\bи\b|\bили\b|\bдо\b|\bпо\b)\s*(?:№\s*)?\d{1,4})*)(?!\d)", re.I)
 _ЕДИНИЦЫ = re.compile(r"^\s*(?:[,.]\d+\s*)?(?:сот|га\b|гектар|руб|₽|тыс|млн|кв\.?\s*м)", re.I)
 _ПРЕДЛОЖЕНИЕ = re.compile(
     r"(?<!не )\b(?:свобод\w*|доступ\w*|предлага\w*|предлож\w*|подойд\w*|подобрал\w*|"
@@ -91,7 +91,11 @@ def упоминания(текст: str) -> list[tuple[list[int], str]]:
             # с предыдущего участка на следующий.
             if pos:
                 left = clause[matches[pos - 1].end():match.start()].rsplit(",", 1)[-1]
-            out.append(([int(n) for n in re.findall(r"\d+", match.group("numbers"))], left + " " + right))
+            number_text = match.group("numbers")
+            numbers = {int(n) for n in re.findall(r"\d+", number_text)}
+            for start, finish in re.findall(r"(\d+)\s*(?:[-–—]|\bдо\b|\bпо\b)\s*(?:№\s*)?(\d+)", number_text):
+                numbers.update(range(min(int(start), int(finish)), max(int(start), int(finish)) + 1))
+            out.append((sorted(numbers), left + " " + right))
     return out
 
 

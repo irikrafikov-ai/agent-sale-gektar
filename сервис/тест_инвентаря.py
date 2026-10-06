@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 import инвентарь as inventory
 
-CSV = "Участок,Статус,Площадь,Цена\n3,Продан,7.91,310072\n4,Акция,8,310000\n5,Свободен,8,320000\n36,Забронирован,7.7,346500\n"
+CSV = "Участок,Статус,Площадь,Цена\n2,Свободен,8,320000\n3,Продан,7.91,310072\n4,Акция,8,310000\n5,Свободен,8,320000\n36,Забронирован,7.7,346500\n"
 CAB = {"шахматка": "https://example.invalid/test.csv"}
 
 
@@ -28,6 +28,12 @@ class InventoryTests(unittest.TestCase):
 
     def test_free_and_promo_can_be_offered(self):
         self.check("Предлагаю №4 или №5.", False)
+        self.check("Свободны №4–5.", False)
+
+    def test_number_ranges_do_not_hide_sold_parcels(self):
+        for text in ("Свободны №2–4.", "Предлагаю участки с 2 по 4.", "Можно выбрать №2 до №4."):
+            with self.subTest(text=text):
+                self.check(text, True)
 
     def test_wrong_unavailable_status_is_not_accepted(self):
         self.check("№3 забронирован.", True)
