@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,24 @@ import инструменты as бизнес_инструменты
 
 КОРЕНЬ = Path(__file__).resolve().parent.parent
 БАЗА_ЗНАНИЙ = Path(os.environ.get("KB_PATH", "/opt/база-знаний"))
+DURABLE_DATA = Path("/data/sales/data")
+INFRASTRUCTURE_ROOT = Path("/data/sales")
+
+
+def _рабочие_данные() -> Path:
+    anchor = КОРЕНЬ / "данные"
+    if anchor.is_symlink():
+        if os.readlink(anchor) != str(DURABLE_DATA) or anchor.resolve() != DURABLE_DATA:
+            raise ValueError("неразрешённое отображение рабочих данных")
+        for component in (DURABLE_DATA, *DURABLE_DATA.parents):
+            if component.is_symlink():
+                raise ValueError("небезопасное отображение рабочих данных")
+        if not DURABLE_DATA.is_dir():
+            raise ValueError("рабочие данные недоступны")
+        return DURABLE_DATA
+    if anchor.resolve() != anchor.absolute():
+        raise ValueError("неразрешённый родитель рабочих данных")
+    return anchor.resolve()
 
 
 def _схема_объекта(поля: dict[str, type]) -> dict[str, Any]:
@@ -60,14 +79,21 @@ def _разрешённый_путь(сырой: str, *, запись: bool = Fa
     if not путь.is_absolute():
         путь = КОРЕНЬ / путь
     путь = путь.resolve()
+    данные = _рабочие_данные()
+    if ((путь == INFRASTRUCTURE_ROOT or INFRASTRUCTURE_ROOT in путь.parents)
+            and not (путь == данные or данные in путь.parents)):
+        raise ValueError("служебный архив недоступен инструментам")
+    if any(part.casefold() in {".env", ".codex", ".claude", "auth.json", "credentials.json"}
+           or part.casefold().startswith(".env.") for part in путь.parts):
+        raise ValueError("секреты недоступны инструментам")
 
     разрешены_чтение = [
         (КОРЕНЬ / "AGENT.md").resolve(),
         (КОРЕНЬ / "регламент").resolve(),
-        (КОРЕНЬ / "данные").resolve(),
+        данные,
         БАЗА_ЗНАНИЙ.resolve(),
     ]
-    разрешены = [(КОРЕНЬ / "данные").resolve()] if запись else разрешены_чтение
+    разрешены = [данные] if запись else разрешены_чтение
     if not any(путь == корень or корень in путь.parents for корень in разрешены):
         действие = "записи" if запись else "чтения"
         raise ValueError(f"путь вне разрешённой области {действие}: {сырой}")
@@ -114,6 +140,10 @@ def _grep(args: dict) -> list[dict[str, Any]]:
     файлы = [корень] if корень.is_file() else корень.rglob(маска)
     найдено: list[dict[str, Any]] = []
     for файл in файлы:
+        try:
+            файл = _разрешённый_путь(str(файл))
+        except ValueError:
+            continue
         if not файл.is_file():
             continue
         try:
@@ -131,15 +161,32 @@ def _grep(args: dict) -> list[dict[str, Any]]:
 def _glob(args: dict) -> list[str]:
     корень = _разрешённый_путь(args["path"])
     предел = 300
-    return [str(п) for п in list(корень.glob(args["pattern"]))[:предел] if п.is_file()]
+    found = []
+    for path in корень.glob(args["pattern"]):
+        try:
+            path = _разрешённый_путь(str(path))
+        except ValueError:
+            continue
+        if path.is_file():
+            found.append(str(path))
+            if len(found) >= предел:
+                break
+    return found
 
 
 def _write(args: dict) -> dict[str, Any]:
     путь = _разрешённый_путь(args["file_path"], запись=True)
     путь.parent.mkdir(parents=True, exist_ok=True)
-    временный = путь.with_suffix(путь.suffix + ".tmp")
-    временный.write_text(args["content"], encoding="utf-8")
-    временный.replace(путь)
+    fd, временный = tempfile.mkstemp(prefix=".work-", dir=путь.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(args["content"])
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(временный, путь)
+    finally:
+        if os.path.exists(временный):
+            os.unlink(временный)
     return {"written": str(путь), "characters": len(args["content"])}
 
 

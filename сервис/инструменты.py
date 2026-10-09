@@ -26,6 +26,7 @@ from claude_agent_sdk import create_sdk_mcp_server, tool as _claude_tool
 from интеграции.avito import Avito
 from интеграции.bitrix import Bitrix
 from интеграции.telegram import Telegram
+from ссылки_авито import профиль_для_алерта
 from интеграции.umnico import (Umnico, UmnicoError, нормализовать_номер, НОМЕР_КАНАЛА,
                                почему_не_ушло)
 
@@ -896,6 +897,12 @@ async def handoff_chat(args: dict) -> dict:
     if not chat_id:
         return _err("нужен chat_id")
 
+    окружение = os.environ.copy()
+    import провайдер
+    if провайдер.выбран() == "codex":
+        from codex_sdk import digest
+        окружение["CODEX_OPERATION_KEY"] = "sales:handoff:" + digest([
+            args.get("account") or "gektar", chat_id, datetime.now(МСК).strftime("%Y-%m-%d")])
     процесс = subprocess.run(
         [
             sys.executable,
@@ -908,6 +915,7 @@ async def handoff_chat(args: dict) -> dict:
         capture_output=True,
         text=True,
         timeout=480,
+        env=окружение,
     )
     if процесс.returncode != 0:
         return _err(
@@ -978,7 +986,13 @@ async def telegram_alert(args: dict) -> dict:
         )
 
     try:
-        telegram().send(args["text"], alert=True)
+        профиль = профиль_для_алерта(_avito(args), chat_id)
+    except Exception:
+        профиль = "профиль Авито не получен"
+    try:
+        telegram().send(
+            f"{args['text']}\n\n{профиль}\n"
+            f"Кабинет: {args.get('account') or 'gektar'}\nЧат: `{chat_id}`", alert=True)
     except Exception as e:
         return _err(str(e))
 

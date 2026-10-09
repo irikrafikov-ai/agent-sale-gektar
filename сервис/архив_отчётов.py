@@ -12,7 +12,8 @@
     ОТЧЁТ|<unix>|<ГГГГ-ММ-ДД>
     <текст отчёта целиком, как ушёл в Телеграм>
 
-Повтор за ту же дату (перезапуск вечера) заменяет прежнюю запись.
+Повтор идентичного текста за ту же дату — no-op. Исправления дописываются,
+прежняя история никогда не удаляется; отображается последняя версия дня.
 """
 
 from __future__ import annotations
@@ -86,7 +87,7 @@ def _комментарии(b: Bitrix, предел: int = 400) -> list[dict]:
 
 
 def сохранить(текст: str, когда: float | None = None) -> bool:
-    """Положить отчёт в архив. Сбой не роняет отправку — только stderr."""
+    """Append-only архив. False оставляет отчёт в outbox без отправки в TG."""
     if not (текст or "").strip():
         return False
     b = None
@@ -95,15 +96,12 @@ def сохранить(текст: str, когда: float | None = None) -> bool
         дата = _дата(когда or time.time())
         for к in _комментарии(b, предел=100):
             з = разобрать(к.get("COMMENT") or "")
-            if з and з["дата"] == дата:
-                try:
-                    b.call("crm.timeline.comment.delete", {"id": к.get("ID")})
-                except Exception:  # noqa: BLE001
-                    pass
+            if з and з["дата"] == дата and з["текст"] == текст.strip():
+                return True
         b.timeline_comment_add(СДЕЛКА_АРХИВА, запись(текст, когда))
         return True
     except Exception as ошибка:  # noqa: BLE001
-        print(f"[архив отчётов] не сохранён: {type(ошибка).__name__}: {ошибка}", file=sys.stderr)
+        print(f"[архив отчётов] не сохранён: {type(ошибка).__name__}", file=sys.stderr)
         return False
     finally:
         if b is not None:
@@ -132,7 +130,12 @@ def прочитать(дней: int = 60) -> list[dict]:
                 b.close()
             except Exception:  # noqa: BLE001
                 pass
-    return sorted(отчёты, key=lambda з: з["когда"], reverse=True)
+    # API order is newest ID first: stable sort keeps the latest revision even
+    # if a delivery retry uses the same original report timestamp.
+    unique = {}
+    for report in sorted(отчёты, key=lambda з: з["когда"], reverse=True):
+        unique.setdefault(report["дата"], report)
+    return list(unique.values())
 
 
 _ВЫВОД = re.compile(r"##\s*📌\s*Вывод дня.*?(?=\n##\s|\n---|\Z)", re.S)

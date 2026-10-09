@@ -58,6 +58,7 @@ import отчёт as цифры  # noqa: E402
 import обучение  # noqa: E402
 import архив_отчётов  # noqa: E402
 import расход  # noqa: E402
+import провайдер  # noqa: E402
 from интеграции.bitrix import Bitrix  # noqa: E402
 from интеграции.telegram import Telegram  # noqa: E402
 
@@ -72,7 +73,11 @@ from интеграции.telegram import Telegram  # noqa: E402
 
 def openai_режим() -> bool:
     """Agents SDK включается явно: без ключа боевой сервис не переключаем."""
-    return os.environ.get("AGENT_SDK_PROVIDER", "claude").strip().lower() == "openai"
+    return провайдер.выбран() == "openai"
+
+
+def codex_режим() -> bool:
+    return провайдер.выбран() == "codex"
 
 
 def обновить_базу_знаний() -> str:
@@ -1215,6 +1220,8 @@ def печать_расхода(расход_прогона: dict, модель:
     журнал падала бы на ровном месте — ровно так 04.09 список ИМЕНА
     затёрся списком инструментов и обесточил стоп-кран.
     """
+    ПОСЛЕДНИЙ_ИТОГ.clear()
+    ПОСЛЕДНИЙ_ИТОГ.update(расход_прогона.get("итог") or {})
     u = расход_прогона.get("usage") or {}
 
     def чис(имя: str) -> int:
@@ -1327,7 +1334,9 @@ async def прогон(вид: str, каб: dict, chat_id: str | None = None, п
     # Модель печатаем в лог. 22.08 полные прогоны перевели на Sonnet ради
     # расхода, и выяснилось, что проверить переключение нечем: ни в логе, ни в
     # отчёте модели не было. Сравнивать качество «до и после» вслепую нельзя.
-    if openai_режим():
+    if codex_режим():
+        модель = провайдер.codex_model("chat" if chat_id else "run", simple=os.environ.get("ХОД_ПРОСТОЙ") == "1")
+    elif openai_режим():
         модель = (
             os.environ.get("OPENAI_AGENT_MODEL_ЧАТ", "gpt-6-astra")
             if chat_id
@@ -1383,6 +1392,23 @@ async def прогон(вид: str, каб: dict, chat_id: str | None = None, п
     последний = ""
     расход: dict = {}
     try:
+        if codex_режим():
+            import codex_sdk
+            if chat_id:
+                operation_key = os.environ.get("CODEX_OPERATION_KEY")
+                if not operation_key:
+                    raise codex_sdk.CodexError("chat_operation_identity_required")
+            else:
+                operation_key = f"sales:{каб['ключ']}:{вид}:{datetime.now(МСК):%Y-%m-%d}"
+            результат = await codex_sdk.выполнить(
+                текст_задания, модель=модель, имена_инструментов=имена_инструментов,
+                максимум_ходов=максимум_ходов, operation_key=operation_key,
+                purpose="sales.chat" if chat_id else "sales.run")
+            последний = результат["text"]
+            расход.update(результат)
+            расход["след"] = ("Codex decision loop", ["text", "usage", "итог"])
+            печать_расхода(расход, модель or "Codex backend configuration", вид, каб["ключ"])
+            return последний
         if openai_режим():
             import openai_sdk
 
@@ -1537,7 +1563,9 @@ async def повествование_дня(
     # поэтому здесь самая сильная модель (предложение Ирика 18.09.2026:
     # Fable 5.1). Стоит это доли доллара за вечер. Если Fable недоступна
     # или вернула пустоту — второй заход на Opus, чтобы вывод был всегда.
-    if openai_режим():
+    if codex_режим():
+        модели = [провайдер.codex_model("review")]
+    elif openai_режим():
         модели = [
             м for м in (
                 os.environ.get("OPENAI_AGENT_MODEL_ВЫВОД", "gpt-6-astra"),
@@ -1632,6 +1660,12 @@ async def повествование_дня(
 из фактов выше. Общих слов («быть внимательнее», «улучшать коммуникацию»)
 не должно быть ни одного.
 
+При каждом упоминании конкретного тёплого клиента, включая примеры и
+«Завтра делаю иначе», прикрепляй Markdown-ссылку на его профиль Авито из
+фактов выше, указывай кабинет и chat_id. Не угадывай URL по имени/ID и не
+бери профиль другого клиента. Нет ссылки — «профиль Авито не получен».
+План не разрешает касания клиентам на личном ведении Ирика/менеджера.
+
 ## ⚠️ Требуют вас
 Только то, что без Ирика не сдвинется: решения, которые принимает он, и
 пропущенные входящие. Нечего — пиши «нет», это нормальный ответ.
@@ -1677,6 +1711,13 @@ async def повествование_дня(
     последняя_ошибка = ""
     for модель in модели:
         try:
+            if codex_режим():
+                import codex_sdk
+                результат = await codex_sdk.выполнить(
+                    задание_текста, модель=модель, имена_инструментов=[],
+                    максимум_ходов=1, имя="Автор вечернего отчёта ГектарЪ",
+                    operation_key=f"sales:review:{datetime.now(МСК):%Y-%m-%d}", purpose="sales.review")
+                return результат["text"]
             if openai_режим():
                 import openai_sdk
 
@@ -1760,12 +1801,12 @@ async def повествование_дня(
     # алерт о падении не сработал, и Ирик узнал об этом только на следующий
     # день. Пустой баланс останавливает всего агента, включая ответы
     # клиентам по вебхуку, — про это сообщаем сразу, как про падение сервера.
-    if бюджет_кончился(последняя_ошибка):
+    if not codex_режим() and бюджет_кончился(последняя_ошибка):
         try:
-            провайдер = "OpenAI" if openai_режим() else "Anthropic"
+            провайдер_имя = "OpenAI" if openai_режим() else "Anthropic"
             биллинг = "platform.openai.com → Billing" if openai_режим() else "console.anthropic.com → Billing"
             Telegram().send(
-                f"🔴 *АГЕНТ ОСТАНОВЛЕН: кончились деньги на API {провайдер}*\n\n"
+                f"🔴 *АГЕНТ ОСТАНОВЛЕН: кончились деньги на API {провайдер_имя}*\n\n"
                 f"`{кратко(последняя_ошибка)}`\n\n"
                 "Вывод дня не написан, гипотезы за сегодня не проверены. "
                 "Ответы клиентам по вебхуку тоже не работают.\n"
@@ -1813,6 +1854,11 @@ def запасной_отчёт(отправлено: list[dict]) -> str:
 ОБЯЗАТЕЛЬНЫЕ = {
     "ANTHROPIC_API_KEY": "ключ Anthropic (console.anthropic.com → API Keys)",
     "OPENAI_API_KEY": "ключ OpenAI (platform.openai.com → API keys)",
+    "CODEX_BACKEND_URL": "HTTPS origin серверного Codex backend",
+    "CODEX_BACKEND_TOKEN": "секрет server-to-server Codex backend",
+    "SALES_RUNTIME_DIR": "закрытый каталог на постоянном Railway volume",
+    "SALES_CODEX_BIN": "абсолютный путь к локальному Codex CLI",
+    "CODEX_MODEL": "явная модель Codex для локального транспорта",
     "AVITO_CLIENT_ID": "Авито → Настройки → Клиенты и приложения",
     "AVITO_CLIENT_SECRET": "там же, рядом с client_id",
     "BITRIX_WEBHOOK": "Битрикс → Разработчикам → Входящий вебхук",
@@ -1827,9 +1873,17 @@ def проверить_переменные() -> list[str]:
     Без этой проверки процесс падал сырым KeyError на первой же отсутствующей
     переменной: чинишь одну, деплоишь, узнаёшь про следующую.
     """
-    модельный_ключ = "OPENAI_API_KEY" if openai_режим() else "ANTHROPIC_API_KEY"
-    общие = [имя for имя in ОБЯЗАТЕЛЬНЫЕ if имя not in {"OPENAI_API_KEY", "ANTHROPIC_API_KEY"}]
-    return [имя for имя in [модельный_ключ, *общие] if not os.environ.get(имя)]
+    специальные = {"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "CODEX_BACKEND_URL", "CODEX_BACKEND_TOKEN", "SALES_RUNTIME_DIR", "SALES_CODEX_BIN", "CODEX_MODEL"}
+    if codex_режим():
+        транспорт = os.environ.get("SALES_CODEX_TRANSPORT", "http")
+        if транспорт not in {"http", "local"}:
+            raise ValueError("Неизвестный SALES_CODEX_TRANSPORT")
+        модельные = (["SALES_CODEX_BIN", "CODEX_MODEL", "SALES_RUNTIME_DIR"] if транспорт == "local"
+                    else ["CODEX_BACKEND_URL", "CODEX_BACKEND_TOKEN", "SALES_RUNTIME_DIR"])
+    else:
+        модельные = ["OPENAI_API_KEY" if openai_режим() else "ANTHROPIC_API_KEY"]
+    общие = [имя for имя in ОБЯЗАТЕЛЬНЫЕ if имя not in специальные]
+    return [имя for имя in [*модельные, *общие] if not os.environ.get(имя)]
 
 
 # Сколько минут прогон имеет право идти. Обычный утренний укладывается в
@@ -1942,6 +1996,15 @@ def main() -> int:
         return 1
 
     telegram = Telegram()
+    if вид == "вечер" and not chat_id and ключ_кабинета == реестр.ПО_УМОЛЧАНИЮ:
+        import доставка_отчёта
+        today = datetime.now(МСК).date().isoformat()
+        if доставка_отчёта.уже_сохранён(today):
+            # A delivery retry must never repeat the day's clients or reflection.
+            status = доставка_отчёта.доставить(today)
+            print(f"[отчёт] сохранён ранее; доставка: {status['status']}", flush=True)
+            telegram.close()
+            return 0 if status["status"] == "sent" else 2
     сторож_времени(вид)
 
     # Сбои этого прогона собираем КОДОМ по ходу дела: раздел «Сбои» в отчёте
@@ -2075,7 +2138,9 @@ def main() -> int:
     # «модель» из прогона() сюда не видна. 25.08 подпись с ней уронила
     # ВСЕ чат-разборы на самом финале — сообщение клиенту уже ушло, а процесс
     # умирал кодом 1, и сторож честно брал чат в разбор снова.
-    if openai_режим():
+    if codex_режим():
+        модель_ = ПОСЛЕДНИЙ_ИТОГ.get("model") or провайдер.codex_model("chat" if chat_id else "run") or "Codex backend configuration"
+    elif openai_режим():
         модель_ = (
             os.environ.get("OPENAI_AGENT_MODEL_ЧАТ", "gpt-6-astra")
             if chat_id
@@ -2260,14 +2325,26 @@ def main() -> int:
     print(текст_отчёта, flush=True)
     print("=== КОНЕЦ ОТЧЁТА ===\n", flush=True)
 
+    report_pending = False
     # Отчёт ОДИН на оба кабинета — указание Ирика 09.09.2026. Отправляет
     # только якорный кабинет; второй свою работу делает и пишет её в лог,
     # но в Телеграм не лезет, иначе отчётов снова станет два.
     if вид == "вечер" and ключ_кабинета == реестр.ПО_УМОЛЧАНИЮ:
-        telegram.send(текст_отчёта)
-        # Архив отчётов (Ирик, 21.09.2026): тот же текст — в историю на
-        # дашборде и в накопленные данные для вечернего разбора.
-        архив_отчётов.сохранить(текст_отчёта)
+        if os.environ.get("SALES_RUNTIME_DIR"):
+            import доставка_отчёта
+            delivery = доставка_отчёта.сохранить_и_доставить(текст_отчёта, reflection=блок_вывода)
+            report_pending = delivery["status"] != "sent"
+            print(f"[отчёт] архив сохранён; доставка: {delivery['status']}", flush=True)
+            if delivery["status"] != "sent":
+                print("[отчёт] доставка требует отдельного retry/reconciliation, не повтора продаж", file=sys.stderr)
+        else:
+            if codex_режим():
+                raise RuntimeError("persistent_sales_report_runtime_required")
+            # Before scheduled cutover, retain legacy routing; even here archive
+            # first so Telegram failure cannot erase the day's report.
+            if not архив_отчётов.сохранить(текст_отчёта):
+                raise RuntimeError("crm_report_archive_failed")
+            telegram.send(текст_отчёта)
         # Журнал расхода: вчерашний день сводится в одну строку-итог, сырые
         # строки закрытых дней старше трёх суток убираются. Делается ПОСЛЕ
         # отправки отчёта — цифры за сутки уже посчитаны, месяц собран.
@@ -2288,7 +2365,7 @@ def main() -> int:
     else:
         print(f"(в Телеграм не уходит — Ирик читает один отчёт в день, вечером)", flush=True)
     telegram.close()
-    return 0
+    return 2 if report_pending else 0
 
 
 if __name__ == "__main__":

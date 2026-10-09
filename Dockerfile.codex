@@ -1,0 +1,54 @@
+# Только серверные продажи через приватный ChatGPT/Codex backend.
+# Legacy Dockerfile остаётся отдельным и не изменяется этим релизом.
+
+FROM python:3.12-slim
+
+# git — для подтягивания базы знаний перед каждым прогоном.
+# Native Codex работает в отдельном backend; Claude Code CLI не устанавливается.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY сервис/requirements.txt сервис/requirements.txt
+RUN pip install --no-cache-dir -r сервис/requirements.txt
+
+# Регламент и рабочая память. База знаний сюда НЕ копируется —
+# она тянется из своего репозитория на старте каждого прогона.
+COPY AGENT.md README.md ./
+COPY регламент/ регламент/
+# Seed is read only to the agent. Bootstrap copies allowlisted work documents
+# once to the dedicated volume, then maps /app/данные to its data subdirectory.
+COPY данные/ /opt/sales-seed/
+COPY сервис/ сервис/
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/сервис \
+    KB_PATH=/opt/база-знаний
+
+# Только офлайн-проверки: импорт настоящих SDK и тест адаптера без LLM/API.
+# Ошибка импорта должна остановить сборку, а не уже работающий вебхук.
+RUN python -c "import инструменты, вебхук, openai_sdk" \
+    && python сервис/тест_openai_sdk.py \
+    && python сервис/тест_аудита.py \
+    && python сервис/тест_инвентаря.py \
+    && python сервис/тест_codex.py \
+    && python сервис/тест_bootstrap.py \
+    && python сервис/тест_события_codex.py
+
+# Бизнес-код работает от agent после bootstrap, а не от root.
+RUN useradd --create-home --shell /bin/bash agent \
+    && mkdir -p /opt/база-знаний \
+    && chown -R agent:agent /app /opt/база-знаний \
+    && chmod -R go-w /opt/sales-seed
+
+# Bootstrap starts as root only for new-volume ownership, then irrevocably
+# drops groups/gid/uid before importing or executing any business code.
+USER root
+ENV HOME=/home/agent
+
+# Аргумент — вид прогона: утро | вечер.
+# Railway передаёт его в команде расписания.
+ENTRYPOINT ["python", "сервис/bootstrap.py"]
+CMD ["вечер"]

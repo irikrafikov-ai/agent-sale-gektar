@@ -24,6 +24,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 def main() -> int:
     роль = sys.argv[1] if len(sys.argv) > 1 else "вечер"
 
+    if роль == "доставка-отчёта":
+        import доставка_отчёта
+        return доставка_отчёта.main(sys.argv[2:])
+
     if роль == "вебхук":
         import uvicorn
 
